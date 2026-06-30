@@ -69,35 +69,66 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         try {
-          if (!credentials?.email || !credentials?.password) return null;
-          const email = credentials.email.trim().toLowerCase();
+          const email =
+            typeof credentials?.email === "string" ? credentials.email.trim().toLowerCase() : "";
+          const password = typeof credentials?.password === "string" ? credentials.password : "";
+
+          if (!email || !password) return null;
+
           const firebaseAuth = getFirebaseClientAuth();
 
           const userCredential = await signInWithEmailAndPassword(
             firebaseAuth,
             email,
-            credentials.password
+            password
           );
 
+          const firebaseUser = userCredential?.user;
+          const uid = firebaseUser?.uid;
+
+          if (!uid) {
+            console.error("NextAuth Authorize Error: Firebase user or UID is missing");
+            return null;
+          }
+
           const firestore = getFirebaseAdminFirestore();
+          let userDoc = await firestore.collection("users").doc(uid).get();
 
-          const userDoc = await firestore.collection("users").doc(userCredential.user.uid).get();
-          if (!userDoc.exists) return null;
+          if (!userDoc.exists) {
+            const accountDoc = await firestore.collection("accounts").doc(uid).get();
+            if (accountDoc.exists) {
+              userDoc = accountDoc;
+            }
+          }
 
-          const userData = userDoc.data();
-          const role = typeof userData?.role === "string" ? userData.role : null;
+          if (!userDoc.exists) {
+            return {
+              id: uid,
+              name: firebaseUser.displayName || null,
+              email: firebaseUser.email || email,
+              role: "user",
+              restaurantId: null,
+            };
+          }
+
+          const userData = userDoc.data() || {};
+          const role =
+            typeof userData.role === "string" && userData.role.trim() ? userData.role : "user";
           const restaurantId =
-            typeof userData?.restaurantId === "string" ? userData.restaurantId : null;
-
-          if (!role) return null;
+            typeof userData.restaurantId === "string" && userData.restaurantId.trim()
+              ? userData.restaurantId
+              : null;
 
           return {
-            id: userCredential.user.uid,
+            id: uid,
             name:
-              typeof userData?.name === "string"
+              typeof userData.name === "string" && userData.name.trim()
                 ? userData.name
-                : userCredential.user.displayName,
-            email: userCredential.user.email || email,
+                : firebaseUser.displayName || null,
+            email:
+              typeof userData.email === "string" && userData.email.trim()
+                ? userData.email
+                : firebaseUser.email || email,
             role,
             restaurantId,
           };
