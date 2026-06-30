@@ -1,18 +1,23 @@
-import { NextAuthOptions } from "next-auth";
+import type { DefaultSession, NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import type { DefaultSession } from "next-auth";
-import * as admin from 'firebase-admin';
-import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
+import * as admin from "firebase-admin";
+import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+
+type SafeFirestoreDoc = {
+  exists?: boolean;
+  data?: () => Record<string, unknown> | undefined;
+};
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
     user: {
       id: string;
-      role: string; // "restaurateur" | "super_admin"
+      role: string;
       restaurantId: string | null;
     } & DefaultSession["user"];
   }
+
   interface User {
     restaurantId: string | null;
     role: string;
@@ -27,36 +32,76 @@ declare module "next-auth/jwt" {
   }
 }
 
-function getFirebaseClientAuth() {
-  const firebaseConfig: FirebaseOptions = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
-  };
+function getStringEnv(name: string) {
+  const value = process.env[name];
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
 
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
-  return getAuth(app);
+function getFirebaseClientAuth() {
+  try {
+    const firebaseConfig: FirebaseOptions = {
+      apiKey: getStringEnv("NEXT_PUBLIC_FIREBASE_API_KEY"),
+      authDomain: getStringEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"),
+      projectId: getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID"),
+      storageBucket: getStringEnv("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"),
+      messagingSenderId: getStringEnv("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
+      appId: getStringEnv("NEXT_PUBLIC_FIREBASE_APP_ID"),
+    };
+
+    const firebaseApps = typeof getApps === "function" ? getApps() : [];
+    const app = Array.isArray(firebaseApps) && firebaseApps[0]
+      ? firebaseApps[0]
+      : initializeApp(firebaseConfig);
+
+    return getAuth(app);
+  } catch (error) {
+    console.error("NextAuth Firebase Client Init Error:", error);
+    return null;
+  }
 }
 
 function getFirebaseAdminFirestore() {
-  const privateKey = process.env.FIREBASE_PRIVATE_KEY
-    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
-    : undefined;
+  try {
+    const projectId = getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
+    const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY
+      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+      : undefined;
 
-  if (!admin.apps.length) {
-    admin.initializeApp({
-      credential: admin.credential.cert({
-        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
-        privateKey: privateKey,
-      }),
-    });
+    if (!projectId || !clientEmail || !privateKey) {
+      console.error("NextAuth Firebase Admin Error: missing Firebase Admin environment variables");
+      return null;
+    }
+
+    if (
+      !admin ||
+      !admin.apps ||
+      admin.apps.length === 0
+    ) {
+      if (!admin?.credential?.cert || !admin?.initializeApp) {
+        console.error("NextAuth Firebase Admin Error: firebase-admin is not available");
+        return null;
+      }
+
+      admin.initializeApp({
+        credential: admin.credential.cert({
+          projectId,
+          clientEmail,
+          privateKey,
+        }),
+      });
+    }
+
+    if (!admin?.firestore) {
+      console.error("NextAuth Firebase Admin Error: Firestore is not available");
+      return null;
+    }
+
+    return admin.firestore();
+  } catch (error) {
+    console.error("NextAuth Firebase Admin Init Error:", error);
+    return null;
   }
-
-  return admin.firestore();
 }
 
 export const authOptions: NextAuthOptions = {
@@ -69,66 +114,117 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         try {
-          const email =
-            typeof credentials?.email === "string" ? credentials.email.trim().toLowerCase() : "";
-          const password = typeof credentials?.password === "string" ? credentials.password : "";
+          let email = "";
+          let password = "";
+
+          try {
+            email =
+              typeof credentials?.email === "string"
+                ? credentials.email.trim().toLowerCase()
+                : "";
+            password = typeof credentials?.password === "string" ? credentials.password : "";
+          } catch (error) {
+            console.error("NextAuth Authorize Credentials Error:", error);
+            return null;
+          }
 
           if (!email || !password) return null;
 
           const firebaseAuth = getFirebaseClientAuth();
+          if (!firebaseAuth) return null;
 
-          const userCredential = await signInWithEmailAndPassword(
-            firebaseAuth,
-            email,
-            password
-          );
+          let firebaseUser:
+            | Awaited<ReturnType<typeof signInWithEmailAndPassword>>["user"]
+            | null = null;
 
-          const firebaseUser = userCredential?.user;
-          const uid = firebaseUser?.uid;
-
-          if (!uid) {
-            console.error("NextAuth Authorize Error: Firebase user or UID is missing");
+          try {
+            const userCredential = await signInWithEmailAndPassword(
+              firebaseAuth,
+              email,
+              password
+            );
+            firebaseUser = userCredential?.user || null;
+          } catch (error) {
+            console.error("NextAuth Firebase SignIn Error:", error);
             return null;
           }
 
+          const uid = typeof firebaseUser?.uid === "string" ? firebaseUser.uid : "";
+          if (!uid) {
+            console.error("NextAuth Authorize Error: Firebase user UID is missing");
+            return null;
+          }
+
+          const fallbackUser = {
+            id: uid,
+            name:
+              typeof firebaseUser?.displayName === "string" && firebaseUser.displayName.trim()
+                ? firebaseUser.displayName
+                : null,
+            email:
+              typeof firebaseUser?.email === "string" && firebaseUser.email.trim()
+                ? firebaseUser.email
+                : email,
+            role: "user",
+            restaurantId: null,
+          };
+
           const firestore = getFirebaseAdminFirestore();
-          let userDoc = await firestore.collection("users").doc(uid).get();
+          if (!firestore) return fallbackUser;
 
-          if (!userDoc.exists) {
-            const accountDoc = await firestore.collection("accounts").doc(uid).get();
-            if (accountDoc.exists) {
-              userDoc = accountDoc;
+          let userDoc: SafeFirestoreDoc | null = null;
+
+          try {
+            userDoc = await firestore.collection("users").doc(uid).get();
+          } catch (error) {
+            console.error("NextAuth Firestore Users Read Error:", error);
+            return fallbackUser;
+          }
+
+          try {
+            if (!userDoc?.exists) {
+              const accountDoc = await firestore.collection("accounts").doc(uid).get();
+              if (accountDoc?.exists) {
+                userDoc = accountDoc;
+              }
             }
+          } catch (error) {
+            console.error("NextAuth Firestore Accounts Read Error:", error);
+            return fallbackUser;
           }
 
-          if (!userDoc.exists) {
-            return {
-              id: uid,
-              name: firebaseUser.displayName || null,
-              email: firebaseUser.email || email,
-              role: "user",
-              restaurantId: null,
-            };
+          if (!userDoc?.exists) return fallbackUser;
+
+          let userData: Record<string, unknown> = {};
+
+          try {
+            userData = userDoc.data() || {};
+          } catch (error) {
+            console.error("NextAuth Firestore Data Error:", error);
+            return fallbackUser;
           }
 
-          const userData = userDoc.data() || {};
           const role =
-            typeof userData.role === "string" && userData.role.trim() ? userData.role : "user";
+            typeof userData.role === "string" && userData.role.trim()
+              ? userData.role
+              : "user";
           const restaurantId =
             typeof userData.restaurantId === "string" && userData.restaurantId.trim()
               ? userData.restaurantId
               : null;
+          const name =
+            typeof userData.name === "string" && userData.name.trim()
+              ? userData.name
+              : fallbackUser.name;
+          const userEmail =
+            typeof userData.email === "string" && userData.email.trim()
+              ? userData.email
+              : fallbackUser.email;
 
           return {
             id: uid,
-            name:
-              typeof userData.name === "string" && userData.name.trim()
-                ? userData.name
-                : firebaseUser.displayName || null,
-            email:
-              typeof userData.email === "string" && userData.email.trim()
-                ? userData.email
-                : firebaseUser.email || email,
+            name,
+            email: userEmail,
             role,
             restaurantId,
           };
@@ -141,19 +237,35 @@ export const authOptions: NextAuthOptions = {
   ],
   callbacks: {
     async jwt({ token, user }) {
-      if (user) {
-        token.id = user.id;
-        token.role = user.role;
-        token.restaurantId = user.restaurantId;
+      try {
+        if (user) {
+          token.id = typeof user.id === "string" ? user.id : "";
+          token.role = typeof user.role === "string" ? user.role : "user";
+          token.restaurantId =
+            typeof user.restaurantId === "string" && user.restaurantId.trim()
+              ? user.restaurantId
+              : null;
+        }
+      } catch (error) {
+        console.error("NextAuth JWT Callback Error:", error);
       }
+
       return token;
     },
     async session({ session, token }) {
-      if (session.user) {
-        session.user.id = token.id;
-        session.user.role = token.role;
-        session.user.restaurantId = token.restaurantId;
+      try {
+        if (session.user) {
+          session.user.id = typeof token.id === "string" ? token.id : "";
+          session.user.role = typeof token.role === "string" ? token.role : "user";
+          session.user.restaurantId =
+            typeof token.restaurantId === "string" && token.restaurantId.trim()
+              ? token.restaurantId
+              : null;
+        }
+      } catch (error) {
+        console.error("NextAuth Session Callback Error:", error);
       }
+
       return session;
     },
   },
@@ -162,7 +274,7 @@ export const authOptions: NextAuthOptions = {
   },
   session: {
     strategy: "jwt",
-    maxAge: 24 * 60 * 60, // 24h
+    maxAge: 24 * 60 * 60,
   },
   secret: process.env.NEXTAUTH_SECRET || "dev-secret-change-in-production-menu-qr-v1",
 };
