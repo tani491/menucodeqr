@@ -1,8 +1,10 @@
 "use client";
 
-import { Suspense, useState } from "react";
-import { signIn } from "next-auth/react";
+import { Suspense, useState, type FormEvent } from "react";
+import { signIn as signInWithNextAuth } from "next-auth/react";
 import { useRouter, useSearchParams } from "next/navigation";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { auth } from "@/lib/firebaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,50 +28,53 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
     setLoading(true);
 
-    const result = await signIn("credentials", {
-      email: email.trim().toLowerCase(),
-      password,
-      redirect: false,
-    });
-
-    setLoading(false);
-
-    if (result?.error) {
-      setError("Email ou mot de passe incorrect.");
-      return;
-    }
-
-    // Redirection intelligente selon le rôle de l'utilisateur
-    // Si callbackUrl est fourni, l'utiliser (ex: /dashboard, /admin)
-    // Sinon, vérifier le rôle dans la réponse et rediriger
-    if (callbackUrl) {
-      router.push(callbackUrl);
-      router.refresh();
-      return;
-    }
-
-    // Récupérer la session pour déterminer le rôle
-    // NextAuth stocke le rôle dans le JWT, on le récupère via /api/auth/session
     try {
-      const sessionRes = await fetch("/api/auth/session");
-      const sessionData = await sessionRes.json();
+      const normalizedEmail = email.trim().toLowerCase();
 
-      if (sessionData?.user?.role === "super_admin") {
-        router.push("/admin");
-      } else if (sessionData?.user?.role === "restaurateur") {
-        router.push("/dashboard");
-      } else {
+      await signInWithEmailAndPassword(auth, normalizedEmail, password);
+
+      const result = await signInWithNextAuth("credentials", {
+        email: normalizedEmail,
+        password,
+        redirect: false,
+      });
+
+      if (result?.error) {
+        setError("Email ou mot de passe incorrect.");
+        return;
+      }
+
+      if (callbackUrl) {
+        router.push(callbackUrl);
+        router.refresh();
+        return;
+      }
+
+      try {
+        const sessionRes = await fetch("/api/auth/session");
+        const sessionData = await sessionRes.json();
+
+        if (sessionData?.user?.role === "super_admin") {
+          router.push("/admin");
+        } else if (sessionData?.user?.role === "restaurateur") {
+          router.push("/dashboard");
+        } else {
+          router.push("/");
+        }
+      } catch {
         router.push("/");
       }
+      router.refresh();
     } catch {
-      router.push("/");
+      setError("Email ou mot de passe incorrect.");
+    } finally {
+      setLoading(false);
     }
-    router.refresh();
   }
 
   return (
@@ -82,7 +87,7 @@ function LoginForm() {
         </div>
         <CardTitle className="text-xl">Connexion</CardTitle>
         <CardDescription>
-          Accédez à votre espace de gestion
+          Accedez a votre espace de gestion
         </CardDescription>
       </CardHeader>
       <form onSubmit={handleSubmit}>
@@ -94,7 +99,7 @@ function LoginForm() {
           )}
           {searchParams.get("error") === "no_restaurant" && (
             <div className="rounded-lg border border-amber-500/50 bg-amber-500/10 p-3 text-sm text-amber-700">
-              Aucun restaurant associé à votre compte. Contactez un administrateur.
+              Aucun restaurant associe a votre compte. Contactez un administrateur.
             </div>
           )}
           <div className="space-y-2">
@@ -102,7 +107,7 @@ function LoginForm() {
             <Input
               id="email"
               type="email"
-              placeholder="restaurateur@exemple.com"
+              placeholder="votre@email.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
@@ -115,7 +120,7 @@ function LoginForm() {
             <Input
               id="password"
               type="password"
-              placeholder="••••••••"
+              placeholder="********"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
@@ -128,7 +133,7 @@ function LoginForm() {
           <Button type="submit" className="w-full" disabled={loading}>
             {loading ? (
               <span className="flex items-center gap-2">
-                <Loader2 className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />
+                <Loader2 className="w-4 h-4 animate-spin" />
                 Connexion...
               </span>
             ) : (
@@ -137,12 +142,6 @@ function LoginForm() {
           </Button>
         </CardFooter>
       </form>
-      <div className="px-6 pb-6 space-y-2">
-        <div className="text-xs text-center text-muted-foreground space-y-0.5">
-          <p><strong>Super Admin</strong> : admin@menuqr.com / admin1234</p>
-          <p><strong>Restaurateur</strong> : restaurateur@petitbistrot.fr / demo1234</p>
-        </div>
-      </div>
     </Card>
   );
 }

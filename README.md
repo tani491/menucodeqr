@@ -633,5 +633,6 @@ En production sur Vercel, le filesystem est en lecture seule. Vous devez :
 ### Avertissement "The middleware file convention is deprecated"
 
 Cet avertissement apparaît avec Next.js 16 qui recommande d'utiliser la convention "proxy" à la place de "middleware". Le middleware fonctionne toujours correctement. Pour supprimer l'avertissement, vous pouvez migrer vers la convention `proxy.ts` dans une future version.
-#   m e n u c o d e q r  
+#   m e n u c o d e q r 
+ 
  
