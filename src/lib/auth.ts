@@ -1,9 +1,9 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
-import { db } from "@/lib/db";
-import bcrypt from "bcryptjs";
 import type { DefaultSession } from "next-auth";
-import { verifyFirebaseEmailPassword } from "@/lib/firebaseAuth";
+import { signInWithEmailAndPassword } from "firebase/auth";
+import { getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
+import { auth as firebaseAuth } from "@/lib/firebaseClient";
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -39,33 +39,39 @@ export const authOptions: NextAuthOptions = {
         if (!credentials?.email || !credentials?.password) return null;
         const email = credentials.email.trim().toLowerCase();
 
-        const user = await db.user.findUnique({
-          where: { email },
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            password: true,
-            role: true,
-            restaurantId: true,
-          },
-        });
+        try {
+          const userCredential = await signInWithEmailAndPassword(
+            firebaseAuth,
+            email,
+            credentials.password
+          );
 
-        if (!user) return null;
+          const firestore = getFirebaseAdminFirestore();
+          if (!firestore) return null;
 
-        const firebasePasswordValid = await verifyFirebaseEmailPassword(email, credentials.password);
-        const isValid =
-          firebasePasswordValid ?? (await bcrypt.compare(credentials.password, user.password));
+          const userDoc = await firestore.collection("users").doc(userCredential.user.uid).get();
+          if (!userDoc.exists) return null;
 
-        if (!isValid) return null;
+          const userData = userDoc.data();
+          const role = typeof userData?.role === "string" ? userData.role : null;
+          const restaurantId =
+            typeof userData?.restaurantId === "string" ? userData.restaurantId : null;
 
-        return {
-          id: user.id,
-          name: user.name,
-          email: user.email,
-          role: user.role,
-          restaurantId: user.restaurantId,
-        };
+          if (!role) return null;
+
+          return {
+            id: userCredential.user.uid,
+            name:
+              typeof userData?.name === "string"
+                ? userData.name
+                : userCredential.user.displayName,
+            email: userCredential.user.email || email,
+            role,
+            restaurantId,
+          };
+        } catch {
+          return null;
+        }
       },
     }),
   ],
