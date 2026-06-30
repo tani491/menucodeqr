@@ -1,9 +1,9 @@
 import { NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import type { DefaultSession } from "next-auth";
-import { signInWithEmailAndPassword } from "firebase/auth";
-import { getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
-import { auth as firebaseAuth } from "@/lib/firebaseClient";
+import * as admin from 'firebase-admin';
+import { getApp, getApps, initializeApp, type FirebaseOptions } from "firebase/app";
+import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -27,6 +27,38 @@ declare module "next-auth/jwt" {
   }
 }
 
+function getFirebaseClientAuth() {
+  const firebaseConfig: FirebaseOptions = {
+    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
+    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
+    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
+    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+  };
+
+  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  return getAuth(app);
+}
+
+function getFirebaseAdminFirestore() {
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY
+    ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, '\n')
+    : undefined;
+
+  if (!admin.apps.length) {
+    admin.initializeApp({
+      credential: admin.credential.cert({
+        projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
+        clientEmail: process.env.FIREBASE_CLIENT_EMAIL,
+        privateKey: privateKey,
+      }),
+    });
+  }
+
+  return admin.firestore();
+}
+
 export const authOptions: NextAuthOptions = {
   providers: [
     CredentialsProvider({
@@ -36,10 +68,11 @@ export const authOptions: NextAuthOptions = {
         password: { label: "Mot de passe", type: "password" },
       },
       async authorize(credentials) {
-        if (!credentials?.email || !credentials?.password) return null;
-        const email = credentials.email.trim().toLowerCase();
-
         try {
+          if (!credentials?.email || !credentials?.password) return null;
+          const email = credentials.email.trim().toLowerCase();
+          const firebaseAuth = getFirebaseClientAuth();
+
           const userCredential = await signInWithEmailAndPassword(
             firebaseAuth,
             email,
@@ -47,7 +80,6 @@ export const authOptions: NextAuthOptions = {
           );
 
           const firestore = getFirebaseAdminFirestore();
-          if (!firestore) return null;
 
           const userDoc = await firestore.collection("users").doc(userCredential.user.uid).get();
           if (!userDoc.exists) return null;
@@ -69,7 +101,8 @@ export const authOptions: NextAuthOptions = {
             role,
             restaurantId,
           };
-        } catch {
+        } catch (error) {
+          console.error("NextAuth Authorize Error:", error);
           return null;
         }
       },
