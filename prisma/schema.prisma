@@ -1,0 +1,135 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Account {
+  id                String  @id @default(cuid())
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String?
+  access_token      String?
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String?
+  session_state     String?
+  user              User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model Session {
+  id           String   @id @default(cuid())
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+model VerificationToken {
+  identifier String
+  token      String   @unique
+  expires    DateTime
+
+  @@unique([identifier, token])
+}
+
+model User {
+  id            String    @id @default(cuid())
+  name          String
+  email         String    @unique
+  emailVerified DateTime?
+  password      String
+  role          String    @default("restaurateur") // "restaurateur" | "super_admin"
+  restaurantId  String?
+  restaurant    Restaurant? @relation(fields: [restaurantId], references: [id], onDelete: SetNull)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+  accounts      Account[]
+  sessions      Session[]
+}
+
+model Restaurant {
+  id        String      @id @default(uuid())
+  slug      String      @unique
+  name      String
+  logoUrl   String?
+  bannerUrl String?
+  primaryColor String  @default("#000000")
+  isSuspended Boolean @default(false) @map("is_suspended")
+  createdAt DateTime    @default(now())
+  categories Category[]
+  users      User[]
+  orders     Order[]
+}
+
+model Category {
+  id           String     @id @default(uuid())
+  restaurantId String
+  nameFr       String
+  nameEn       String
+  sortOrder    Int        @default(0)
+  restaurant   Restaurant @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items        Item[]
+
+  @@index([restaurantId, sortOrder])
+  @@index([restaurantId])
+}
+
+model Item {
+  id            String   @id @default(uuid())
+  restaurantId  String
+  categoryId    String
+  nameFr        String
+  nameEn        String
+  descriptionFr String?
+  descriptionEn String?
+  price         Float
+  imageUrl      String?
+  videoUrl      String?
+  isAvailable   Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  category      Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+  orderItems    OrderItem[]
+
+  @@index([restaurantId, categoryId, isAvailable])
+  @@index([categoryId])
+  @@index([restaurantId])
+}
+
+model Order {
+  id            String      @id @default(uuid())
+  restaurantId  String
+  tableNumber   String
+  customerName  String
+  customerPhone String
+  status        String      @default("pending")
+  totalPrice    Float
+  notes         String?
+  createdAt     DateTime    @default(now())
+  restaurant    Restaurant  @relation(fields: [restaurantId], references: [id], onDelete: Cascade)
+  items         OrderItem[]
+
+  @@index([restaurantId, status, createdAt])
+  @@index([restaurantId, tableNumber])
+}
+
+model OrderItem {
+  id              String @id @default(uuid())
+  orderId         String
+  itemId          String
+  quantity        Int
+  priceAtPurchase Float
+  order           Order  @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  item            Item   @relation(fields: [itemId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([itemId])
+}

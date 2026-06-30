@@ -1,0 +1,260 @@
+"use client";
+
+import { useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useSession, signOut } from "next-auth/react";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw } from "lucide-react";
+
+type DashboardOrder = {
+  id: string;
+  tableNumber: string;
+  customerName: string;
+  customerPhone: string;
+  status: string;
+  totalPrice: number;
+  notes: string | null;
+  createdAt: string;
+  items: {
+    id: string;
+    quantity: number;
+    priceAtPurchase: number;
+    item: {
+      id: string;
+      nameFr: string;
+      nameEn: string;
+    };
+  }[];
+};
+
+const STATUS_COLUMNS = [
+  { id: "pending", label: "En attente", next: "confirmed", action: "Confirmer" },
+  { id: "confirmed", label: "Confirmees", next: "preparing", action: "Preparer" },
+  { id: "preparing", label: "En preparation", next: "ready", action: "Prete !" },
+  { id: "ready", label: "Pretes", next: "", action: "" },
+];
+
+export default function DashboardOrdersPage() {
+  const { data: session, status } = useSession();
+  const router = useRouter();
+  const [orders, setOrders] = useState<DashboardOrder[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [restaurantIsSuspended, setRestaurantIsSuspended] = useState(false);
+  const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (status === "unauthenticated") router.push("/login");
+    if (status === "authenticated" && session?.user?.role !== "restaurateur") router.push("/admin");
+  }, [router, session, status]);
+
+  const fetchOrders = useCallback(async () => {
+    const res = await fetch("/api/dashboard/orders", { cache: "no-store" });
+    if (res.status === 401 || res.status === 403) {
+      router.push("/login");
+      return;
+    }
+    const payload = await res.json();
+    setOrders(payload.orders || []);
+    setRestaurantIsSuspended(Boolean(payload.restaurantIsSuspended));
+    setLoading(false);
+  }, [router]);
+
+  useEffect(() => {
+    if (status === "authenticated" && session?.user?.role === "restaurateur") {
+      fetchOrders();
+    }
+  }, [fetchOrders, session, status]);
+
+  useEffect(() => {
+    if (orders.length === 0) return;
+    const newest = orders[0]?.id;
+    if (lastSeenOrderId && newest && newest !== lastSeenOrderId) {
+      try {
+        const audio = new Audio("/notification.mp3");
+        audio.volume = 0.4;
+        audio.play().catch(() => undefined);
+      } catch {
+        // Notification sonore optionnelle selon le navigateur.
+      }
+    }
+    if (newest) setLastSeenOrderId(newest);
+  }, [lastSeenOrderId, orders]);
+
+  useEffect(() => {
+    if (status !== "authenticated" || session?.user?.role !== "restaurateur") return;
+
+    const interval = window.setInterval(fetchOrders, 8000);
+    return () => {
+      window.clearInterval(interval);
+    };
+  }, [fetchOrders, session, status]);
+
+  const grouped = useMemo(() => {
+    return STATUS_COLUMNS.reduce<Record<string, DashboardOrder[]>>((acc, column) => {
+      acc[column.id] = orders.filter((order) => order.status === column.id);
+      return acc;
+    }, {});
+  }, [orders]);
+
+  async function updateStatus(orderId: string, status: string) {
+    setUpdatingId(orderId);
+    try {
+      const res = await fetch(`/api/dashboard/orders/${orderId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      });
+      if (res.ok) await fetchOrders();
+    } finally {
+      setUpdatingId(null);
+    }
+  }
+
+  if (status === "loading" || loading) {
+    return (
+      <div className="flex min-h-screen items-center justify-center bg-background">
+        <RefreshCw className="h-8 w-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  if (!session || session.user?.role !== "restaurateur") return null;
+
+  if (restaurantIsSuspended) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-md">
+          <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/dashboard">
+                <ArrowLeft className="mr-1.5 h-4 w-4" />
+                Dashboard
+              </Link>
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
+              <LogOut className="mr-1.5 h-4 w-4" />
+              <span className="hidden sm:inline">Deconnexion</span>
+            </Button>
+          </div>
+        </header>
+        <main className="mx-auto max-w-2xl px-4 py-10">
+          <div className="rounded-xl border border-red-200 bg-red-50 p-5 text-red-800 shadow-sm">
+            <h1 className="text-lg font-bold">Compte suspendu</h1>
+            <p className="mt-2 text-sm leading-relaxed">
+              Votre compte a ete suspendu pour defaut de paiement. Veuillez contacter
+              l&apos;administrateur de l&apos;application pour regulariser votre situation.
+            </p>
+          </div>
+        </main>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-background">
+      <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-md">
+        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4">
+          <div className="flex items-center gap-3">
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/dashboard">
+                <ArrowLeft className="mr-1.5 h-4 w-4" />
+                Dashboard
+              </Link>
+            </Button>
+            <div className="flex items-center gap-2">
+              <ChefHat className="h-5 w-5 text-primary" />
+              <h1 className="text-sm font-semibold sm:text-base">Commandes en salle</h1>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" size="sm" onClick={fetchOrders}>
+              <RefreshCw className="mr-1.5 h-4 w-4" />
+              Actualiser
+            </Button>
+            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
+              <LogOut className="mr-1.5 h-4 w-4" />
+              <span className="hidden sm:inline">Deconnexion</span>
+            </Button>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto max-w-7xl px-3 py-4 sm:px-4">
+        <div className="mb-4 flex items-center gap-2 rounded-lg border bg-card p-3 text-sm text-muted-foreground">
+          <Bell className="h-4 w-4" />
+          Les nouvelles commandes sont actualisees automatiquement.
+        </div>
+
+        <div className="grid gap-3 lg:grid-cols-4">
+          {STATUS_COLUMNS.map((column) => (
+            <section key={column.id} className="min-h-40 rounded-lg border bg-card">
+              <div className="flex items-center justify-between border-b p-3">
+                <h2 className="text-sm font-semibold">{column.label}</h2>
+                <Badge variant="secondary">{grouped[column.id]?.length || 0}</Badge>
+              </div>
+              <div className="space-y-3 p-3">
+                {(grouped[column.id] || []).map((order) => (
+                  <article key={order.id} className="rounded-lg border bg-white p-3 shadow-sm">
+                    <div className="mb-3 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-2xl font-bold text-black">Table {order.tableNumber}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {new Date(order.createdAt).toLocaleTimeString("fr-FR", {
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          })}
+                        </p>
+                      </div>
+                      <p className="text-sm font-bold text-black">
+                        {order.totalPrice.toLocaleString("fr-FR")} FCFA
+                      </p>
+                    </div>
+                    <div className="mb-3 rounded-md bg-muted/60 p-2 text-xs">
+                      <p className="font-medium text-black">{order.customerName}</p>
+                      <p className="text-muted-foreground">{order.customerPhone}</p>
+                      {order.notes && <p className="mt-1 text-black">Note: {order.notes}</p>}
+                    </div>
+                    <ul className="mb-3 space-y-1 text-sm">
+                      {order.items.map((line) => (
+                        <li key={line.id} className="flex justify-between gap-3">
+                          <span className="text-black">
+                            {line.quantity}x {line.item.nameFr}
+                          </span>
+                          <span className="text-muted-foreground">
+                            {(line.quantity * line.priceAtPurchase).toLocaleString("fr-FR")} FCFA
+                          </span>
+                        </li>
+                      ))}
+                    </ul>
+                    {column.next && (
+                      <Button
+                        className="w-full"
+                        size="sm"
+                        disabled={updatingId === order.id}
+                        onClick={() => updateStatus(order.id, column.next)}
+                      >
+                        {updatingId === order.id ? "Mise a jour..." : column.action}
+                      </Button>
+                    )}
+                    {column.id === "ready" && (
+                      <div className="flex items-center justify-center gap-1 rounded-md bg-emerald-50 p-2 text-xs font-medium text-emerald-700">
+                        <Clock className="h-3.5 w-3.5" />
+                        Pret a servir
+                      </div>
+                    )}
+                  </article>
+                ))}
+                {(grouped[column.id] || []).length === 0 && (
+                  <p className="py-8 text-center text-sm text-muted-foreground">Aucune commande</p>
+                )}
+              </div>
+            </section>
+          ))}
+        </div>
+      </main>
+    </div>
+  );
+}
