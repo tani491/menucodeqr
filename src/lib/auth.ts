@@ -345,12 +345,21 @@ export const authOptions: NextAuthOptions = {
         }
 
         const callbackUrl = targetUrl.searchParams.get("callbackUrl");
+        const callbackTarget = callbackUrl ? new URL(callbackUrl, baseUrl) : null;
+        const callbackPath =
+          callbackTarget && callbackTarget.origin === baseUrl
+            ? callbackTarget.pathname
+            : "";
 
-        if (callbackUrl?.startsWith("/admin")) {
+        if (callbackPath.startsWith("/admin")) {
           return `${baseUrl}/admin`;
         }
 
-        if (callbackUrl?.startsWith("/dashboard")) {
+        if (callbackPath.startsWith("/dashboard")) {
+          return `${baseUrl}/dashboard`;
+        }
+
+        if (callbackPath.startsWith("/menu")) {
           return `${baseUrl}/dashboard`;
         }
 
@@ -359,6 +368,10 @@ export const authOptions: NextAuthOptions = {
         }
 
         if (targetUrl.pathname.startsWith("/dashboard")) {
+          return `${baseUrl}/dashboard`;
+        }
+
+        if (targetUrl.pathname.startsWith("/menu")) {
           return `${baseUrl}/dashboard`;
         }
 

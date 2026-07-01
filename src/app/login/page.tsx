@@ -1,7 +1,7 @@
 "use client";
 
 import { Suspense, useState, type FormEvent } from "react";
-import { signIn as signInWithNextAuth } from "next-auth/react";
+import { getSession, signIn as signInWithNextAuth } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
@@ -43,7 +43,15 @@ function LoginForm() {
       });
 
       if (result?.ok) {
-        window.location.href = normalizedEmail.includes("admin") ? "/admin" : "/dashboard";
+        const nextSession = await getSession();
+        const role = nextSession?.user?.role;
+
+        if (role === "super_admin" || role === "admin") {
+          window.location.href = "/admin";
+          return;
+        }
+
+        window.location.href = "/dashboard";
         return;
       }
 

@@ -6,7 +6,7 @@ import { getStorage } from "firebase/storage";
 // A placer dans src/lib/firebaseClient.ts.
 // Ce module est destine aux composants/pages client qui ont besoin de Firebase Auth,
 // Firestore ou Storage. Les variables NEXT_PUBLIC_* sont exposees au navigateur.
-const firebaseConfig = {
+export const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
   projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
@@ -22,4 +22,3 @@ export const auth = getAuth(app);
 export const db = getFirestore(app);
 export const storage = getStorage(app);
 export { app };
-

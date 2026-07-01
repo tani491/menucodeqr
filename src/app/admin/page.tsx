@@ -27,8 +27,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
-import { db } from "@/lib/firebaseClient";
-import { addDoc, collection, getDocs } from "firebase/firestore";
+import { db, firebaseConfig } from "@/lib/firebaseClient";
+import { deleteApp, initializeApp } from "firebase/app";
+import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
+import { addDoc, collection, doc, getDocs, setDoc } from "firebase/firestore";
 import {
   Plus,
   LogOut,
@@ -66,6 +68,7 @@ interface CreateRestaurantForm {
   name: string;
   slug: string;
   managerEmail: string;
+  password: string;
   bannerUrl: string;
 }
 
@@ -81,6 +84,27 @@ function normalizeFirestoreDate(value: unknown) {
   }
 
   return new Date().toISOString();
+}
+
+async function createRestaurateurAuthUser(email: string, password: string) {
+  const appName = `restaurant-creator-${Date.now()}-${Math.random()
+    .toString(36)
+    .slice(2)}`;
+  const creatorApp = initializeApp(firebaseConfig, appName);
+
+  try {
+    const userCredential = await createUserWithEmailAndPassword(
+      getAuth(creatorApp),
+      email,
+      password
+    );
+
+    return userCredential.user.uid;
+  } finally {
+    await deleteApp(creatorApp).catch((error) => {
+      console.error("Erreur fermeture Firebase Auth secondaire :", error);
+    });
+  }
 }
 
 // ─── Composants ─────────────────────────────────────────────────────────────
@@ -108,6 +132,7 @@ function CreateRestaurantDialog({
     name: "",
     slug: "",
     managerEmail: "",
+    password: "Resto2026!",
     bannerUrl: "",
   });
   const [saving, setSaving] = useState(false);
@@ -134,29 +159,26 @@ function CreateRestaurantDialog({
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim() || !form.slug.trim() || !form.managerEmail.trim()) return;
+    if (
+      !form.name.trim() ||
+      !form.slug.trim() ||
+      !form.managerEmail.trim() ||
+      form.password.length < 6
+    ) {
+      return;
+    }
     setSaving(true);
 
     try {
       const nameValue = form.name.trim();
       const slugValue = form.slug.trim().toLowerCase();
       const emailValue = form.managerEmail.trim().toLowerCase();
+      const passwordValue = form.password;
       const bannerValue = form.bannerUrl.trim();
       const createdAt = new Date().toISOString();
-
-      const docRef = await addDoc(collection(db, "restaurants"), {
-        name: nameValue,
-        slug: slugValue,
-        userId: emailValue,
-        managerEmail: emailValue,
-        status: "active",
-        createdAt,
-        updatedAt: createdAt,
-        logoUrl: null,
-        bannerUrl: bannerValue || null,
-        primaryColor: "#000000",
-        isSuspended: false,
-      });
+      const uid = await createRestaurateurAuthUser(emailValue, passwordValue);
+      const restaurantRef = doc(collection(db, "restaurants"));
+      const restaurantId = restaurantRef.id;
 
       const defaultCategories = [
         { nameFr: "Entrees", nameEn: "Starters", sortOrder: 1 },
@@ -165,24 +187,66 @@ function CreateRestaurantDialog({
         { nameFr: "Boissons", nameEn: "Drinks", sortOrder: 4 },
       ];
 
+      await setDoc(doc(db, "users", uid), {
+        id: uid,
+        uid,
+        name: nameValue,
+        email: emailValue,
+        role: "restaurateur",
+        restaurantId,
+        status: "active",
+        createdAt,
+        updatedAt: createdAt,
+        mustChangePassword: true,
+      });
+
+      await setDoc(restaurantRef, {
+        id: restaurantId,
+        name: nameValue,
+        slug: slugValue,
+        userId: uid,
+        managerEmail: emailValue,
+        status: "active",
+        createdAt,
+        updatedAt: createdAt,
+        logoUrl: null,
+        bannerUrl: bannerValue || null,
+        primaryColor: "#000000",
+        isSuspended: false,
+        categoriesCount: defaultCategories.length,
+        itemsCount: 0,
+        usersCount: 1,
+        _count: {
+          categories: defaultCategories.length,
+          items: 0,
+          users: 1,
+        },
+      });
+
       await Promise.all(
         defaultCategories.map((category) =>
           addDoc(collection(db, "categories"), {
             ...category,
-            restaurantId: docRef.id,
+            restaurantId,
             createdAt,
             updatedAt: createdAt,
           })
         )
       );
 
-      console.log("Restaurant créé avec succès, ID:", docRef.id);
+      console.log("Restaurant créé avec succès, ID:", restaurantId);
 
       toast.success(`Restaurant "${nameValue}" créé avec ${defaultCategories.length} catégories`);
-      setForm({ name: "", slug: "", managerEmail: "", bannerUrl: "" });
+      setForm({
+        name: "",
+        slug: "",
+        managerEmail: "",
+        password: "Resto2026!",
+        bannerUrl: "",
+      });
       onOpenChange(false);
       onSuccess({
-        id: docRef.id,
+        id: restaurantId,
         slug: slugValue,
         name: nameValue,
         logoUrl: null,
@@ -197,7 +261,16 @@ function CreateRestaurantDialog({
       });
     } catch (error) {
       console.error("Erreur d'écriture directe Firestore :", error);
-      toast.error("Erreur d'écriture Firestore");
+      const code =
+        typeof error === "object" && error && "code" in error
+          ? String(error.code)
+          : "";
+
+      toast.error(
+        code === "auth/email-already-in-use"
+          ? "Cet email possede deja un compte Firebase."
+          : "Erreur de creation du restaurant"
+      );
     } finally {
       setSaving(false);
     }
@@ -258,6 +331,19 @@ function CreateRestaurantDialog({
             />
           </div>
           <div className="space-y-2">
+            <Label htmlFor="r-password">Mot de passe temporaire *</Label>
+            <Input
+              id="r-password"
+              type="text"
+              value={form.password}
+              onChange={(e) => setForm({ ...form, password: e.target.value })}
+              placeholder="Resto2026!"
+              required
+              minLength={6}
+              disabled={saving}
+            />
+          </div>
+          <div className="space-y-2">
             <Label htmlFor="r-banner">URL de la bannière (optionnel)</Label>
             <Input
               id="r-banner"
@@ -271,7 +357,16 @@ function CreateRestaurantDialog({
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={saving}>
               Annuler
             </Button>
-            <Button type="submit" disabled={saving || !form.name.trim() || !form.slug.trim() || !form.managerEmail.trim()}>
+            <Button
+              type="submit"
+              disabled={
+                saving ||
+                !form.name.trim() ||
+                !form.slug.trim() ||
+                !form.managerEmail.trim() ||
+                form.password.length < 6
+              }
+            >
               {saving ? (
                 <span className="flex items-center gap-2">
                   <Loader2 className="w-4 h-4 animate-spin" />
