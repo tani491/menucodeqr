@@ -28,6 +28,17 @@ function LoginForm() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
 
+  function resolvePostLoginPath(role?: string | null) {
+    if (role === "super_admin" || role === "admin") return "/admin";
+    if (role === "restaurateur") return "/dashboard";
+
+    if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
+      return callbackUrl;
+    }
+
+    return "/";
+  }
+
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError("");
@@ -49,25 +60,12 @@ function LoginForm() {
         return;
       }
 
-      if (callbackUrl) {
-        router.push(callbackUrl);
-        router.refresh();
-        return;
-      }
-
       try {
         const sessionRes = await fetch("/api/auth/session");
         const sessionData = await sessionRes.json();
-
-        if (sessionData?.user?.role === "super_admin") {
-          router.push("/admin");
-        } else if (sessionData?.user?.role === "restaurateur") {
-          router.push("/dashboard");
-        } else {
-          router.push("/");
-        }
+        router.push(resolvePostLoginPath(sessionData?.user?.role));
       } catch {
-        router.push("/");
+        router.push(resolvePostLoginPath());
       }
       router.refresh();
     } catch {

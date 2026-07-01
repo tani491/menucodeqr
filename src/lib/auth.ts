@@ -1,6 +1,12 @@
 import type { DefaultSession, NextAuthOptions } from "next-auth";
 import CredentialsProvider from "next-auth/providers/credentials";
 import * as admin from "firebase-admin";
+import {
+  cert,
+  getApps as getAdminApps,
+  initializeApp as initializeAdminApp,
+} from "firebase-admin/app";
+import { getFirestore } from "firebase-admin/firestore";
 import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
 
@@ -8,6 +14,25 @@ type SafeFirestoreDoc = {
   exists?: boolean;
   data?: () => Record<string, unknown> | undefined;
 };
+
+type SafeFirestore = {
+  collection: (name: string) => {
+    doc: (id: string) => {
+      get: () => Promise<SafeFirestoreDoc>;
+    };
+  };
+};
+
+type AdminCompat = {
+  apps?: unknown[];
+  initializeApp?: (options: unknown) => unknown;
+  credential?: {
+    cert?: (serviceAccount: unknown) => unknown;
+  };
+  firestore?: () => unknown;
+};
+
+const adminCompat = admin as unknown as AdminCompat;
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -60,7 +85,7 @@ function getFirebaseClientAuth() {
   }
 }
 
-function getFirebaseAdminFirestore() {
+function getFirebaseAdminFirestore(): SafeFirestore | null {
   try {
     const projectId = getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
     const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
@@ -73,18 +98,69 @@ function getFirebaseAdminFirestore() {
       return null;
     }
 
-    if (
-      !admin ||
-      !admin.apps ||
-      admin.apps.length === 0
-    ) {
-      if (!admin?.credential?.cert || !admin?.initializeApp) {
-        console.error("NextAuth Firebase Admin Error: firebase-admin is not available");
-        return null;
-      }
+    try {
+      const adminApps =
+        adminCompat && adminCompat.apps && Array.isArray(adminCompat.apps)
+          ? adminCompat.apps
+          : getAdminApps();
 
-      admin.initializeApp({
-        credential: admin.credential.cert({
+      if (!adminApps.length) {
+        initializeAdminApp({
+          credential: cert({
+            projectId,
+            clientEmail,
+            privateKey,
+          }),
+        });
+      }
+    } catch (error) {
+      console.error("NextAuth Firebase Admin App Init Error:", error);
+      return null;
+    }
+
+    try {
+      return getFirestore() as unknown as SafeFirestore;
+    } catch (error) {
+      console.error("NextAuth Firebase Admin Firestore Error:", error);
+      return null;
+    }
+  } catch (error) {
+    console.error("NextAuth Firebase Admin Init Error:", error);
+    return null;
+  }
+}
+
+function normalizeRole(role: unknown) {
+  if (typeof role !== "string") return "user";
+
+  const normalizedRole = role.trim();
+  if (!normalizedRole) return "user";
+  if (normalizedRole === "admin") return "super_admin";
+
+  return normalizedRole;
+}
+
+function getAdminCompatFirestore(): SafeFirestore | null {
+  try {
+    const projectId = getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
+    const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
+    const privateKey = process.env.FIREBASE_PRIVATE_KEY
+      ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
+      : undefined;
+
+    if (!projectId || !clientEmail || !privateKey) {
+      return null;
+    }
+
+    if (
+      adminCompat &&
+      adminCompat.apps &&
+      adminCompat.apps.length === 0 &&
+      adminCompat.initializeApp &&
+      adminCompat.credential?.cert
+    ) {
+      adminCompat.initializeApp({
+        credential: adminCompat.credential.cert({
           projectId,
           clientEmail,
           privateKey,
@@ -92,14 +168,9 @@ function getFirebaseAdminFirestore() {
       });
     }
 
-    if (!admin?.firestore) {
-      console.error("NextAuth Firebase Admin Error: Firestore is not available");
-      return null;
-    }
-
-    return admin.firestore();
+    return adminCompat?.firestore ? (adminCompat.firestore() as SafeFirestore) : null;
   } catch (error) {
-    console.error("NextAuth Firebase Admin Init Error:", error);
+    console.error("NextAuth Firebase Admin Compat Error:", error);
     return null;
   }
 }
@@ -169,7 +240,7 @@ export const authOptions: NextAuthOptions = {
             restaurantId: null,
           };
 
-          const firestore = getFirebaseAdminFirestore();
+          const firestore = getFirebaseAdminFirestore() || getAdminCompatFirestore();
           if (!firestore) return fallbackUser;
 
           let userDoc: SafeFirestoreDoc | null = null;
@@ -204,10 +275,7 @@ export const authOptions: NextAuthOptions = {
             return fallbackUser;
           }
 
-          const role =
-            typeof userData.role === "string" && userData.role.trim()
-              ? userData.role
-              : "user";
+          const role = normalizeRole(userData.role);
           const restaurantId =
             typeof userData.restaurantId === "string" && userData.restaurantId.trim()
               ? userData.restaurantId

@@ -6,7 +6,7 @@ import type { NextRequest } from "next/server";
  * Middleware de sécurité — vérifications côté SERVEUR avant le rendu.
  *
  * Stratégie de séparation des rôles :
- *   /admin/*      → exige role = "super_admin"  → sinon 302 vers /login
+ *   /admin/*      → exige role = "super_admin" ou "admin" → sinon 302 vers /login
  *   /dashboard/*  → exige role = "restaurateur" → sinon 302 vers /login
  *   /api/admin/*  → les route handlers renvoient 401/403 eux-mêmes
  *   /api/dashboard/* → idem
@@ -27,7 +27,7 @@ export async function proxy(request: NextRequest) {
     }
 
     // Vérification stricte du rôle
-    if (token.role !== "super_admin") {
+    if (token.role !== "super_admin" && token.role !== "admin") {
       // Un restaurateur qui tente d'accéder à /admin est redirigé vers son dashboard
       return NextResponse.redirect(new URL("/dashboard", request.url));
     }
@@ -40,16 +40,13 @@ export async function proxy(request: NextRequest) {
       return NextResponse.redirect(loginUrl);
     }
 
-    if (token.role !== "restaurateur") {
+    if (token.role === "super_admin" || token.role === "admin") {
       // Un super_admin qui tente d'accéder à /dashboard est redirigé vers /admin
       return NextResponse.redirect(new URL("/admin", request.url));
     }
 
-    if (!token.restaurantId) {
-      // Restaurateur sans restaurant — ne devrait pas arriver, mais sécurité
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("error", "no_restaurant");
-      return NextResponse.redirect(loginUrl);
+    if (token.role !== "restaurateur") {
+      return NextResponse.redirect(new URL("/login", request.url));
     }
   }
 

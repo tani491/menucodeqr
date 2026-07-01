@@ -408,15 +408,17 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [createRestoOpen, setCreateRestoOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const isAdminSession =
+    session?.user?.role === "super_admin" || session?.user?.role === "admin";
 
   // Protection côté client (double sécurité avec le middleware serveur)
   useEffect(() => {
     if (status === "unauthenticated") {
       router.push("/login");
-    } else if (status === "authenticated" && session?.user?.role !== "super_admin") {
+    } else if (status === "authenticated" && !isAdminSession) {
       router.push("/dashboard");
     }
-  }, [status, session, router]);
+  }, [status, isAdminSession, router]);
 
   const fetchRestaurants = useCallback(async () => {
     try {
@@ -435,10 +437,10 @@ export default function AdminPage() {
   }, [router]);
 
   useEffect(() => {
-    if (status === "authenticated" && session?.user?.role === "super_admin") {
+    if (status === "authenticated" && isAdminSession) {
       fetchRestaurants();
     }
-  }, [status, session, fetchRestaurants]);
+  }, [status, isAdminSession, fetchRestaurants]);
 
   // ─── Loading ───────────────────────────────────────────────────────────
 
@@ -484,7 +486,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!session || session.user?.role !== "super_admin") return null;
+  if (!session || !isAdminSession) return null;
 
   const totalItems = restaurants.reduce((acc, r) => acc + r._count.items, 0);
   const totalUsers = restaurants.reduce((acc, r) => acc + r._count.users, 0);

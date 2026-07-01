@@ -744,11 +744,15 @@ export default function DashboardPage() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [setupPending, setSetupPending] = useState(false);
 
   // ─── Protection côté client ────────────────────────────────────────────
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
-    else if (status === "authenticated" && session?.user?.role === "super_admin")
+    else if (
+      status === "authenticated" &&
+      (session?.user?.role === "super_admin" || session?.user?.role === "admin")
+    )
       router.push("/admin");
   }, [status, session, router]);
 
@@ -756,11 +760,30 @@ export default function DashboardPage() {
   const fetchMenu = useCallback(async () => {
     try {
       const res = await fetch("/api/dashboard/menu");
-      if (res.status === 401 || res.status === 403) {
+      if (res.status === 401) {
         router.push("/login");
         return;
       }
+
+      if (res.status === 403 || res.status === 404) {
+        const json = await res.json().catch(() => null);
+        const errorMessage = typeof json?.error === "string" ? json.error : "";
+
+        if (
+          errorMessage.includes("Aucun restaurant") ||
+          errorMessage.includes("Restaurant introuvable")
+        ) {
+          setData(null);
+          setSetupPending(true);
+          return;
+        }
+
+        router.push("/login");
+        return;
+      }
+
       const json = await res.json();
+      setSetupPending(false);
       setData(json);
     } catch {
       toast.error("Erreur de chargement du menu");
@@ -867,7 +890,7 @@ export default function DashboardPage() {
 
   // ─── Loading / Protection ─────────────────────────────────────────────
 
-  if (status === "loading" || !data) {
+  if (status === "loading" || (!data && !setupPending)) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -879,6 +902,45 @@ export default function DashboardPage() {
   }
 
   if (!session) return null;
+
+  if (setupPending) {
+    return (
+      <div className="min-h-screen bg-background">
+        <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b">
+          <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <h1 className="font-semibold text-sm sm:text-base">Tableau de bord</h1>
+              <Badge variant="secondary" className="text-[10px]">
+                En attente
+              </Badge>
+            </div>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => signOut({ callbackUrl: "/login" })}
+            >
+              <LogOut className="w-4 h-4 mr-1.5" />
+              <span className="hidden sm:inline">Deconnexion</span>
+            </Button>
+          </div>
+        </header>
+        <main className="max-w-2xl mx-auto px-4 py-10">
+          <div className="rounded-xl border bg-card p-5 shadow-sm">
+            <div className="flex items-start gap-3">
+              <Package className="w-5 h-5 mt-0.5 text-muted-foreground" />
+              <div>
+                <h2 className="text-lg font-bold">Aucun restaurant configure</h2>
+                <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
+                  Aucun restaurant n&apos;est encore associe a votre compte. Veuillez contacter
+                  l&apos;administrateur pour finaliser la configuration.
+                </p>
+              </div>
+            </div>
+          </div>
+        </main>
+      </div>
+    );
+  }
 
   // ─── Groupage par catégorie ────────────────────────────────────────────
   if (data.restaurantIsSuspended) {
