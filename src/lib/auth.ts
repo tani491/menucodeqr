@@ -336,6 +336,37 @@ export const authOptions: NextAuthOptions = {
 
       return session;
     },
+    async redirect({ url, baseUrl }) {
+      try {
+        const targetUrl = url.startsWith("/") ? new URL(url, baseUrl) : new URL(url);
+
+        if (targetUrl.origin !== baseUrl) {
+          return baseUrl;
+        }
+
+        const callbackUrl = targetUrl.searchParams.get("callbackUrl");
+
+        if (callbackUrl?.startsWith("/admin")) {
+          return `${baseUrl}/admin`;
+        }
+
+        if (callbackUrl?.startsWith("/dashboard")) {
+          return `${baseUrl}/dashboard`;
+        }
+
+        if (targetUrl.pathname.startsWith("/admin")) {
+          return `${baseUrl}/admin`;
+        }
+
+        if (targetUrl.pathname.startsWith("/dashboard")) {
+          return `${baseUrl}/dashboard`;
+        }
+
+        return baseUrl;
+      } catch {
+        return baseUrl;
+      }
+    },
   },
   pages: {
     signIn: "/login",

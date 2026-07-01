@@ -30,13 +30,25 @@ function LoginForm() {
 
   function resolvePostLoginPath(role?: string | null) {
     if (role === "super_admin" || role === "admin") return "/admin";
-    if (role === "restaurateur") return "/dashboard";
+    if (role === "restaurateur" || role === "user") return "/dashboard";
 
-    if (callbackUrl && callbackUrl.startsWith("/") && !callbackUrl.startsWith("//")) {
-      return callbackUrl;
+    if (
+      callbackUrl &&
+      callbackUrl.startsWith("/admin") &&
+      !callbackUrl.startsWith("//")
+    ) {
+      return "/admin";
     }
 
-    return "/";
+    if (
+      callbackUrl &&
+      callbackUrl.startsWith("/dashboard") &&
+      !callbackUrl.startsWith("//")
+    ) {
+      return "/dashboard";
+    }
+
+    return "/dashboard";
   }
 
   async function handleSubmit(e: FormEvent) {
