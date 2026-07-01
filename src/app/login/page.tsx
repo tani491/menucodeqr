@@ -2,7 +2,7 @@
 
 import { Suspense, useState, type FormEvent } from "react";
 import { signIn as signInWithNextAuth } from "next-auth/react";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
 import { Button } from "@/components/ui/button";
@@ -19,37 +19,12 @@ import {
 import { Loader2 } from "lucide-react";
 
 function LoginForm() {
-  const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get("callbackUrl");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(false);
-
-  function resolvePostLoginPath(role?: string | null) {
-    if (role === "super_admin" || role === "admin") return "/admin";
-    if (role === "restaurateur" || role === "user") return "/dashboard";
-
-    if (
-      callbackUrl &&
-      callbackUrl.startsWith("/admin") &&
-      !callbackUrl.startsWith("//")
-    ) {
-      return "/admin";
-    }
-
-    if (
-      callbackUrl &&
-      callbackUrl.startsWith("/dashboard") &&
-      !callbackUrl.startsWith("//")
-    ) {
-      return "/dashboard";
-    }
-
-    return "/dashboard";
-  }
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -67,23 +42,26 @@ function LoginForm() {
         redirect: false,
       });
 
-      if (result?.error) {
-        setError("Email ou mot de passe incorrect.");
+      if (result?.ok) {
+        window.location.href = normalizedEmail.includes("admin") ? "/admin" : "/dashboard";
         return;
       }
 
-      try {
-        const sessionRes = await fetch("/api/auth/session");
-        const sessionData = await sessionRes.json();
-        router.push(resolvePostLoginPath(sessionData?.user?.role));
-      } catch {
-        router.push(resolvePostLoginPath());
+      if (result?.error) {
+        setError("Email ou mot de passe incorrect.");
+        setLoading(false);
+        return;
       }
-      router.refresh();
+
+      setError("Email ou mot de passe incorrect.");
+      setLoading(false);
     } catch {
       setError("Email ou mot de passe incorrect.");
-    } finally {
       setLoading(false);
+    } finally {
+      if (typeof window === "undefined") {
+        setLoading(false);
+      }
     }
   }
 
