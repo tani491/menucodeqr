@@ -27,6 +27,8 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { toast } from "sonner";
+import { db } from "@/lib/firebaseClient";
+import { addDoc, collection, getDocs } from "firebase/firestore";
 import {
   Plus,
   LogOut,
@@ -67,6 +69,20 @@ interface CreateRestaurantForm {
   bannerUrl: string;
 }
 
+function normalizeFirestoreDate(value: unknown) {
+  if (typeof value === "string") return value;
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof value.toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
 // ─── Composants ─────────────────────────────────────────────────────────────
 
 function StatCard({ icon: Icon, label, value }: { icon: React.ElementType; label: string; value: number }) {
@@ -86,7 +102,7 @@ function CreateRestaurantDialog({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
+  onSuccess: (restaurant: RestaurantRow) => void;
 }) {
   const [form, setForm] = useState<CreateRestaurantForm>({
     name: "",
@@ -122,29 +138,66 @@ function CreateRestaurantDialog({
     setSaving(true);
 
     try {
-      const res = await fetch("/api/admin/restaurants", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: form.name,
-          slug: form.slug,
-          managerEmail: form.managerEmail,
-        }),
+      const nameValue = form.name.trim();
+      const slugValue = form.slug.trim().toLowerCase();
+      const emailValue = form.managerEmail.trim().toLowerCase();
+      const bannerValue = form.bannerUrl.trim();
+      const createdAt = new Date().toISOString();
+
+      const docRef = await addDoc(collection(db, "restaurants"), {
+        name: nameValue,
+        slug: slugValue,
+        userId: emailValue,
+        managerEmail: emailValue,
+        status: "active",
+        createdAt,
+        updatedAt: createdAt,
+        logoUrl: null,
+        bannerUrl: bannerValue || null,
+        primaryColor: "#000000",
+        isSuspended: false,
       });
 
-      const data = await res.json();
+      const defaultCategories = [
+        { nameFr: "Entrees", nameEn: "Starters", sortOrder: 1 },
+        { nameFr: "Plats", nameEn: "Main Courses", sortOrder: 2 },
+        { nameFr: "Desserts", nameEn: "Desserts", sortOrder: 3 },
+        { nameFr: "Boissons", nameEn: "Drinks", sortOrder: 4 },
+      ];
 
-      if (!res.ok) {
-        toast.error(data.error || "Erreur de création");
-        return;
-      }
+      await Promise.all(
+        defaultCategories.map((category) =>
+          addDoc(collection(db, "categories"), {
+            ...category,
+            restaurantId: docRef.id,
+            createdAt,
+            updatedAt: createdAt,
+          })
+        )
+      );
 
-      toast.success(`Restaurant "${data.name}" créé avec ${data.categories.length} catégories`);
+      console.log("Restaurant créé avec succès, ID:", docRef.id);
+
+      toast.success(`Restaurant "${nameValue}" créé avec ${defaultCategories.length} catégories`);
       setForm({ name: "", slug: "", managerEmail: "", bannerUrl: "" });
       onOpenChange(false);
-      onSuccess();
-    } catch {
-      toast.error("Erreur réseau");
+      onSuccess({
+        id: docRef.id,
+        slug: slugValue,
+        name: nameValue,
+        logoUrl: null,
+        bannerUrl: bannerValue || null,
+        isSuspended: false,
+        createdAt,
+        _count: {
+          categories: defaultCategories.length,
+          users: 1,
+          items: 0,
+        },
+      });
+    } catch (error) {
+      console.error("Erreur d'écriture directe Firestore :", error);
+      toast.error("Erreur d'écriture Firestore");
     } finally {
       setSaving(false);
     }
@@ -422,19 +475,45 @@ export default function AdminPage() {
 
   const fetchRestaurants = useCallback(async () => {
     try {
-      const res = await fetch("/api/admin/restaurants");
-      if (res.status === 401 || res.status === 403) {
-        router.push("/login");
-        return;
-      }
-      const data = await res.json();
-      setRestaurants(data.restaurants || []);
-    } catch {
+      const snapshot = await getDocs(collection(db, "restaurants"));
+      const nextRestaurants = snapshot.docs
+        .map((docSnap) => {
+          const data = docSnap.data();
+          const countData =
+            data._count &&
+            typeof data._count === "object" &&
+            !Array.isArray(data._count)
+              ? (data._count as Record<string, unknown>)
+              : {};
+
+          return {
+            id: docSnap.id,
+            slug: typeof data.slug === "string" ? data.slug : "",
+            name: typeof data.name === "string" ? data.name : "Restaurant",
+            logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
+            bannerUrl: typeof data.bannerUrl === "string" ? data.bannerUrl : null,
+            isSuspended: Boolean(data.isSuspended),
+            createdAt: normalizeFirestoreDate(data.createdAt),
+            _count: {
+              categories: Number(countData.categories ?? data.categoriesCount ?? 0),
+              items: Number(countData.items ?? data.itemsCount ?? 0),
+              users: Number(countData.users ?? data.usersCount ?? 0),
+            },
+          };
+        })
+        .sort(
+          (a, b) =>
+            new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+        );
+
+      setRestaurants(nextRestaurants);
+    } catch (error) {
+      console.error("Erreur de lecture Firestore restaurants :", error);
       toast.error("Erreur de chargement");
     } finally {
       setLoading(false);
     }
-  }, [router]);
+  }, []);
 
   useEffect(() => {
     if (status === "authenticated" && isAdminSession) {
@@ -653,7 +732,12 @@ export default function AdminPage() {
       <CreateRestaurantDialog
         open={createRestoOpen}
         onOpenChange={setCreateRestoOpen}
-        onSuccess={fetchRestaurants}
+        onSuccess={(restaurant) =>
+          setRestaurants((current) => [
+            restaurant,
+            ...current.filter((item) => item.id !== restaurant.id),
+          ])
+        }
       />
       <PasswordSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
