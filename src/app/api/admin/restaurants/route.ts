@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { db } from "@/lib/db";
-import { getFirebaseAdminAuth } from "@/lib/firebaseAdmin";
-import bcrypt from "bcryptjs";
-import { randomUUID } from "crypto";
+import { getFirebaseAdminAuth, getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
+import { FieldValue } from "firebase-admin/firestore";
 
 async function provisionFirebaseManager({
   email,
@@ -19,7 +18,7 @@ async function provisionFirebaseManager({
   const adminAuth = getFirebaseAdminAuth();
 
   if (!adminAuth) {
-    return { synced: false, passwordSetupLink: null as string | null };
+    return { synced: false, uid: null as string | null, passwordSetupLink: null as string | null };
   }
 
   const normalizedEmail = email.trim().toLowerCase();
@@ -55,21 +54,15 @@ async function provisionFirebaseManager({
     url: `${baseUrl.replace(/\/$/, "")}/login`,
   });
 
-  return { synced: true, passwordSetupLink };
+  return { synced: true, uid: userRecord.uid, passwordSetupLink };
 }
 
-/**
- * GET /api/admin/restaurants
- * Liste tous les restaurants avec leurs statistiques.
- * Réservé au super_admin — le JWT contient le rôle.
- */
 export async function GET() {
   const auth = await requireAuth();
   if (auth.error) return auth.error;
 
-  // Vérification rôle super_admin — sécurité côté serveur
   if (auth.role !== "super_admin") {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+    return NextResponse.json({ error: "Acces refuse" }, { status: 403 });
   }
 
   const restaurants = await db.restaurant.findMany({
@@ -91,7 +84,6 @@ export async function GET() {
     },
   });
 
-  // Compte les items par restaurant (relation indirecte via Category)
   const itemCounts = await db.item.groupBy({
     by: ["restaurantId"],
     _count: true,
@@ -111,36 +103,33 @@ export async function GET() {
   return NextResponse.json({ restaurants: enriched });
 }
 
-/**
- * POST /api/admin/restaurants
- * Crée un nouveau restaurant avec ses catégories par défaut.
- * Réservé au super_admin.
- */
 export async function POST(request: NextRequest) {
   const auth = await requireAuth();
   if (auth.error) return auth.error;
 
-  if (auth.role !== "super_admin") {
-    return NextResponse.json({ error: "Accès refusé" }, { status: 403 });
+  if (auth.role !== "super_admin" && auth.role !== "admin") {
+    return NextResponse.json({ error: "Acces refuse" }, { status: 403 });
   }
 
   const body = await request.json();
   const { name, slug, managerEmail, logoUrl, bannerUrl, categories } = body;
 
-  // ─── Validation backend stricte ──────────────────────────────────────────
   if (!name || typeof name !== "string" || name.trim().length < 2 || name.length > 200) {
-    return NextResponse.json({ error: "Nom invalide (2-200 caractères)" }, { status: 400 });
+    return NextResponse.json({ error: "Nom invalide (2-200 caracteres)" }, { status: 400 });
   }
 
   if (!slug || typeof slug !== "string") {
     return NextResponse.json({ error: "Slug requis" }, { status: 400 });
   }
 
-  if (!managerEmail || typeof managerEmail !== "string" || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(managerEmail)) {
+  if (
+    !managerEmail ||
+    typeof managerEmail !== "string" ||
+    !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(managerEmail)
+  ) {
     return NextResponse.json({ error: "Email gerant invalide" }, { status: 400 });
   }
 
-  // Slug : lettres, chiffres, tirets uniquement
   const slugRegex = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
   if (!slugRegex.test(slug) || slug.length < 2 || slug.length > 100) {
     return NextResponse.json(
@@ -149,95 +138,153 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Vérifie l'unicité du slug
   const normalizedManagerEmail = managerEmail.trim().toLowerCase();
-  const existingManager = await db.user.findUnique({ where: { email: normalizedManagerEmail } });
-  if (existingManager) {
-    return NextResponse.json({ error: "Cet email est deja utilise" }, { status: 409 });
-  }
 
-  const existing = await db.restaurant.findUnique({ where: { slug } });
-  if (existing) {
-    return NextResponse.json({ error: "Ce slug est déjà utilisé" }, { status: 409 });
-  }
-
-  // Catégories par défaut si non spécifiées
   const defaultCategories = [
-    { nameFr: "Entrées", nameEn: "Starters", sortOrder: 1 },
+    { nameFr: "Entrees", nameEn: "Starters", sortOrder: 1 },
     { nameFr: "Plats", nameEn: "Main Courses", sortOrder: 2 },
     { nameFr: "Desserts", nameEn: "Desserts", sortOrder: 3 },
     { nameFr: "Boissons", nameEn: "Drinks", sortOrder: 4 },
   ];
 
-  const categoriesToCreate = Array.isArray(categories) && categories.length > 0
-    ? categories.map((c: { nameFr: string; nameEn?: string; sortOrder?: number }, i: number) => ({
-        nameFr: c.nameFr,
-        nameEn: c.nameEn || c.nameFr,
-        sortOrder: c.sortOrder ?? (i + 1),
-      }))
-    : defaultCategories;
-
-  const restaurant = await db.restaurant.create({
-    data: {
-      slug,
-      name: name.trim(),
-      logoUrl: logoUrl || null,
-      bannerUrl: bannerUrl || null,
-      categories: { create: categoriesToCreate },
-    },
-    include: { categories: true },
-  });
-
-  let firebaseUserSynced = false;
-  let passwordSetupLink: string | null = null;
+  const categoriesToCreate =
+    Array.isArray(categories) && categories.length > 0
+      ? categories.map(
+          (category: { nameFr: string; nameEn?: string; sortOrder?: number }, index: number) => ({
+            nameFr: category.nameFr,
+            nameEn: category.nameEn || category.nameFr,
+            sortOrder: category.sortOrder ?? index + 1,
+          })
+        )
+      : defaultCategories;
 
   try {
+    const firestore = getFirebaseAdminFirestore();
+
+    if (!firestore) {
+      return NextResponse.json(
+        { error: "Configuration Firestore indisponible" },
+        { status: 500 }
+      );
+    }
+
+    const existingSlug = await firestore
+      .collection("restaurants")
+      .where("slug", "==", slug)
+      .limit(1)
+      .get();
+
+    if (!existingSlug.empty) {
+      return NextResponse.json({ error: "Ce slug est deja utilise" }, { status: 409 });
+    }
+
+    const existingUser = await firestore
+      .collection("users")
+      .where("email", "==", normalizedManagerEmail)
+      .limit(1)
+      .get();
+
+    if (!existingUser.empty) {
+      return NextResponse.json({ error: "Cet email est deja utilise" }, { status: 409 });
+    }
+
+    const restaurantRef = firestore.collection("restaurants").doc();
+    const restaurantId = restaurantRef.id;
+
     const firebaseResult = await provisionFirebaseManager({
-      email: managerEmail,
+      email: normalizedManagerEmail,
       name: name.trim(),
-      restaurantId: restaurant.id,
+      restaurantId,
       request,
     });
-    firebaseUserSynced = firebaseResult.synced;
-    passwordSetupLink = firebaseResult.passwordSetupLink;
-  } catch (error) {
-    await db.restaurant.delete({ where: { id: restaurant.id } });
-    const message = error instanceof Error ? error.message : "Erreur Firebase Auth";
-    return NextResponse.json(
-      { error: `Restaurant non cree: provisionnement Firebase impossible (${message})` },
-      { status: 502 }
-    );
-  }
 
-  try {
-    if (firebaseUserSynced) {
-      const temporaryPasswordHash = await bcrypt.hash(randomUUID(), 10);
-      await db.user.create({
-        data: {
-          name: name.trim(),
-          email: normalizedManagerEmail,
-          password: temporaryPasswordHash,
-          role: "restaurateur",
-          restaurantId: restaurant.id,
-        },
-      });
+    if (!firebaseResult.synced || !firebaseResult.uid) {
+      return NextResponse.json(
+        { error: "Restaurant non cree: provisionnement Firebase impossible" },
+        { status: 502 }
+      );
     }
-  } catch (error) {
-    await db.restaurant.delete({ where: { id: restaurant.id } });
-    const message = error instanceof Error ? error.message : "Erreur utilisateur local";
+
+    const now = FieldValue.serverTimestamp();
+    const batch = firestore.batch();
+
+    const restaurantData = {
+      id: restaurantId,
+      name: name.trim(),
+      slug,
+      userId: firebaseResult.uid,
+      managerEmail: normalizedManagerEmail,
+      logoUrl: logoUrl || null,
+      bannerUrl: bannerUrl || null,
+      primaryColor: "#000000",
+      isSuspended: false,
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const createdCategories = categoriesToCreate.map((category) => {
+      const categoryRef = firestore.collection("categories").doc();
+      const categoryData = {
+        id: categoryRef.id,
+        restaurantId,
+        nameFr: category.nameFr,
+        nameEn: category.nameEn,
+        sortOrder: category.sortOrder,
+        createdAt: now,
+        updatedAt: now,
+      };
+
+      batch.set(categoryRef, categoryData);
+      return categoryData;
+    });
+
+    batch.set(restaurantRef, restaurantData);
+    batch.set(
+      firestore.collection("users").doc(firebaseResult.uid),
+      {
+        id: firebaseResult.uid,
+        name: name.trim(),
+        email: normalizedManagerEmail,
+        role: "restaurateur",
+        restaurantId,
+        status: "active",
+        createdAt: now,
+        updatedAt: now,
+      },
+      { merge: true }
+    );
+
+    await batch.commit();
+
+    const timestamp = new Date().toISOString();
+
     return NextResponse.json(
-      { error: `Restaurant non cree: liaison utilisateur impossible (${message})` },
-      { status: 502 }
+      {
+        ...restaurantData,
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        categories: createdCategories.map((category) => ({
+          ...category,
+          createdAt: timestamp,
+          updatedAt: timestamp,
+        })),
+        _count: {
+          categories: createdCategories.length,
+          users: 1,
+          items: 0,
+        },
+        firebaseUserSynced: firebaseResult.synced,
+        passwordSetupLink: firebaseResult.passwordSetupLink,
+      },
+      { status: 201 }
+    );
+  } catch (error) {
+    console.error("Erreur Firestore Restaurant:", error);
+    const message = error instanceof Error ? error.message : "Erreur Firestore";
+    return NextResponse.json(
+      { error: `Restaurant non cree: ${message}` },
+      { status: 500 }
     );
   }
-
-  return NextResponse.json(
-    {
-      ...restaurant,
-      managerEmail: normalizedManagerEmail,
-      firebaseUserSynced,
-      passwordSetupLink,
-    },
-    { status: 201 }
-  );
 }
