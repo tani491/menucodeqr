@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { db as firestoreDb } from "@/lib/firebaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -26,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
+import { collection, getDocs, query, where } from "firebase/firestore";
 import {
   Plus,
   Pencil,
@@ -106,6 +108,121 @@ const EMPTY_FORM: ItemFormData = {
 };
 
 // ─── QR Code Section ────────────────────────────────────────────────────────
+
+type FirestoreRecord = Record<string, unknown>;
+
+const FIRESTORE_DASHBOARD_TIMEOUT_MS = 12000;
+
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new Error(message)), timeoutMs);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
+  });
+}
+
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function nullableStringValue(value: unknown) {
+  return typeof value === "string" && value.trim() ? value : null;
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function booleanValue(value: unknown, fallback = false) {
+  return typeof value === "boolean" ? value : fallback;
+}
+
+function dateStringValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (value as { toDate: () => Date }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+async function getDashboardMenuFromFirestore(userId: string): Promise<MenuResponse | null> {
+  const restaurantsSnapshot = await getDocs(
+    query(collection(firestoreDb, "restaurants"), where("userId", "==", userId))
+  );
+
+  const restaurantDoc = restaurantsSnapshot.docs[0];
+  if (!restaurantDoc) return null;
+
+  const restaurantData = restaurantDoc.data() as FirestoreRecord;
+  const restaurantId = stringValue(restaurantData.id, restaurantDoc.id);
+
+  const [categoriesSnapshot, itemsSnapshot] = await Promise.all([
+    getDocs(query(collection(firestoreDb, "categories"), where("restaurantId", "==", restaurantId))),
+    getDocs(query(collection(firestoreDb, "items"), where("restaurantId", "==", restaurantId))),
+  ]);
+
+  const categories: Category[] = categoriesSnapshot.docs
+    .map((categoryDoc) => {
+      const category = categoryDoc.data() as FirestoreRecord;
+
+      return {
+        id: stringValue(category.id, categoryDoc.id),
+        nameFr: stringValue(category.nameFr, "Categorie"),
+        nameEn: stringValue(category.nameEn, ""),
+        sortOrder: numberValue(category.sortOrder),
+        restaurantId,
+      };
+    })
+    .sort((a, b) => a.sortOrder - b.sortOrder);
+
+  const items: MenuItem[] = itemsSnapshot.docs
+    .map((itemDoc) => {
+      const item = itemDoc.data() as FirestoreRecord;
+
+      return {
+        id: stringValue(item.id, itemDoc.id),
+        nameFr: stringValue(item.nameFr, "Plat"),
+        nameEn: stringValue(item.nameEn, ""),
+        descriptionFr: nullableStringValue(item.descriptionFr),
+        descriptionEn: nullableStringValue(item.descriptionEn),
+        price: numberValue(item.price),
+        imageUrl: nullableStringValue(item.imageUrl),
+        videoUrl: nullableStringValue(item.videoUrl),
+        isAvailable: booleanValue(item.isAvailable, true),
+        categoryId: stringValue(item.categoryId),
+        createdAt: dateStringValue(item.createdAt),
+      };
+    })
+    .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+
+  return {
+    categories,
+    items,
+    restaurantId,
+    restaurantName: stringValue(restaurantData.name, "Restaurant"),
+    restaurantSlug: stringValue(restaurantData.slug),
+    restaurantLogoUrl: nullableStringValue(restaurantData.logoUrl),
+    restaurantBannerUrl: nullableStringValue(restaurantData.bannerUrl),
+    restaurantPrimaryColor: stringValue(restaurantData.primaryColor, "#000000"),
+    restaurantIsSuspended: booleanValue(restaurantData.isSuspended),
+  };
+}
 
 function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
   const [qrPngUrl, setQrPngUrl] = useState<string | null>(null);
@@ -740,6 +857,8 @@ export default function DashboardPage() {
   const router = useRouter();
 
   const [data, setData] = useState<MenuResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
@@ -758,41 +877,52 @@ export default function DashboardPage() {
 
   // ─── Chargement du menu ───────────────────────────────────────────────
   const fetchMenu = useCallback(async () => {
-    try {
-      const res = await fetch("/api/dashboard/menu");
-      if (res.status === 401) {
-        router.push("/login");
-        return;
-      }
+    const userId = session?.user?.id;
 
-      if (res.status === 403 || res.status === 404) {
-        const json = await res.json().catch(() => null);
-        const errorMessage = typeof json?.error === "string" ? json.error : "";
-
-        if (
-          errorMessage.includes("Aucun restaurant") ||
-          errorMessage.includes("Restaurant introuvable")
-        ) {
-          setData(null);
-          setSetupPending(true);
-          return;
-        }
-
-        router.push("/login");
-        return;
-      }
-
-      const json = await res.json();
-      setSetupPending(false);
-      setData(json);
-    } catch {
-      toast.error("Erreur de chargement du menu");
+    if (!userId) {
+      setData(null);
+      setLoadError("Session utilisateur incomplete.");
+      setSetupPending(true);
+      setLoading(false);
+      return;
     }
-  }, [router]);
+
+    try {
+      setLoading(true);
+      setLoadError(null);
+
+      const firestoreData = await withTimeout(
+        getDashboardMenuFromFirestore(userId),
+        FIRESTORE_DASHBOARD_TIMEOUT_MS,
+        "Delai depasse lors du chargement Firestore."
+      );
+
+      if (!firestoreData) {
+        console.log("Aucun restaurant trouve pour cet UID", userId);
+        setData(null);
+        setLoadError("Aucun restaurant n'est associe a votre compte.");
+        setSetupPending(true);
+        return;
+      }
+
+      setSetupPending(false);
+      setData(firestoreData);
+    } catch (err) {
+      console.error("Erreur lors du chargement du restaurant:", err);
+      setData(null);
+      setLoadError("Impossible de charger les donnees du restaurant.");
+      setSetupPending(true);
+      toast.error("Impossible de charger les donnees du restaurant");
+    } finally {
+      setLoading(false);
+    }
+  }, [session?.user?.id]);
 
   useEffect(() => {
-    if (status === "authenticated") fetchMenu();
-  }, [status, fetchMenu]);
+    if (status === "authenticated" && session?.user?.role === "restaurateur") {
+      fetchMenu();
+    }
+  }, [status, session?.user?.role, fetchMenu]);
 
   // ─── Actions ──────────────────────────────────────────────────────────
   const openCreate = useCallback(() => {
@@ -890,7 +1020,7 @@ export default function DashboardPage() {
 
   // ─── Loading / Protection ─────────────────────────────────────────────
 
-  if (status === "loading" || (!data && !setupPending)) {
+  if (status === "loading" || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -929,11 +1059,14 @@ export default function DashboardPage() {
             <div className="flex items-start gap-3">
               <Package className="w-5 h-5 mt-0.5 text-muted-foreground" />
               <div>
-                <h2 className="text-lg font-bold">Aucun restaurant configure</h2>
+                <h2 className="text-lg font-bold">Aucun restaurant trouve</h2>
                 <p className="mt-2 text-sm leading-relaxed text-muted-foreground">
-                  Aucun restaurant n&apos;est encore associe a votre compte. Veuillez contacter
-                  l&apos;administrateur pour finaliser la configuration.
+                  {loadError ||
+                    "Aucun restaurant n'est encore associe a votre compte. Veuillez contacter l'administrateur pour finaliser la configuration."}
                 </p>
+                <Button type="button" size="sm" variant="outline" onClick={fetchMenu} className="mt-4">
+                  Reessayer
+                </Button>
               </div>
             </div>
           </div>
@@ -943,6 +1076,8 @@ export default function DashboardPage() {
   }
 
   // ─── Groupage par catégorie ────────────────────────────────────────────
+  if (!data) return null;
+
   if (data.restaurantIsSuspended) {
     return (
       <div className="min-h-screen bg-background">
