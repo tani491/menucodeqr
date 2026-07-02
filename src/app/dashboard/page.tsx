@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { db as firestoreDb, storage as firebaseStorage } from "@/lib/firebaseClient";
+import { db as firestoreDb } from "@/lib/firebaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -28,7 +28,6 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { addDoc, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
-import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import QRCode from "qrcode";
 import {
   Plus,
@@ -282,22 +281,13 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
   };
 }
 
-function cleanStorageFileName(name: string) {
-  return name
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-zA-Z0-9._-]/g, "-")
-    .replace(/-+/g, "-")
-    .slice(0, 120);
-}
-
-async function uploadDishFile(file: File, restaurantId: string, type: "images" | "videos") {
-  const filename = `${Date.now()}_${cleanStorageFileName(file.name)}`;
-  const fileRef = ref(firebaseStorage, `dishes/${restaurantId}/${type}/${filename}`);
-
-  await uploadBytes(fileRef, file, { contentType: file.type });
-  return getDownloadURL(fileRef);
-}
+const fileToBase64 = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.readAsDataURL(file);
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = (error) => reject(error);
+  });
 
 function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
   const [qrPngUrl, setQrPngUrl] = useState<string | null>(null);
@@ -568,18 +558,6 @@ function RestaurantMediaSection({
     setBannerPreview(file ? URL.createObjectURL(file) : null);
   }
 
-  async function uploadRestaurantMedia(file: File, type: "logo" | "banner", activeRestaurantId: string) {
-    if (!activeRestaurantId) {
-      throw new Error("L'identifiant du restaurant est manquant.");
-    }
-
-    const filename = `${Date.now()}_${cleanStorageFileName(file.name)}`;
-    const fileRef = ref(firebaseStorage, `restaurant-medias/${activeRestaurantId}/${type}/${filename}`);
-
-    await uploadBytes(fileRef, file, { contentType: file.type });
-    return getDownloadURL(fileRef);
-  }
-
   async function handleSave() {
     setSaving(true);
 
@@ -606,12 +584,16 @@ function RestaurantMediaSection({
 
       rememberActiveRestaurantIds(activeRestaurantId, activeRestaurantDocId);
 
-      const nextLogo = logoFile
-        ? await uploadRestaurantMedia(logoFile, "logo", activeRestaurantId)
-        : logo;
-      const nextBanner = bannerFile
-        ? await uploadRestaurantMedia(bannerFile, "banner", activeRestaurantId)
-        : banner;
+      let nextLogo = logo;
+      let nextBanner = banner;
+
+      if (logoFile) {
+        nextLogo = await fileToBase64(logoFile);
+      }
+
+      if (bannerFile) {
+        nextBanner = await fileToBase64(bannerFile);
+      }
 
       await withTimeout(
         updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), {
@@ -1116,20 +1098,11 @@ export default function DashboardPage() {
         }
 
         const now = new Date().toISOString();
-        const nextImageUrl = formData.imageFile
-          ? await withTimeout(
-              uploadDishFile(formData.imageFile, activeRestaurantId, "images"),
-              FIRESTORE_DASHBOARD_TIMEOUT_MS,
-              "Delai depasse lors de l'upload de l'image du plat."
-            )
-          : formData.imageUrl || null;
-        const nextVideoUrl = formData.videoFile
-          ? await withTimeout(
-              uploadDishFile(formData.videoFile, activeRestaurantId, "videos"),
-              FIRESTORE_DASHBOARD_TIMEOUT_MS,
-              "Delai depasse lors de l'upload de la video du plat."
-            )
-          : formData.videoUrl || null;
+        let nextImageUrl = formData.imageUrl || "";
+
+        if (formData.imageFile) {
+          nextImageUrl = await fileToBase64(formData.imageFile);
+        }
 
         const payload = {
           name: formData.nameFr.trim(),
@@ -1142,7 +1115,7 @@ export default function DashboardPage() {
           category: formData.categoryId,
           categoryId: formData.categoryId,
           imageUrl: nextImageUrl,
-          videoUrl: nextVideoUrl || null,
+          videoUrl: null,
           isAvailable: formData.isAvailable,
           status: formData.isAvailable ? "available" : "unavailable",
         };

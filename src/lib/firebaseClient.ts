@@ -1,11 +1,10 @@
-import { getApp, getApps, initializeApp } from "firebase/app";
+import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
 import { getFirestore } from "firebase/firestore";
-import { getStorage } from "firebase/storage";
 
 // A placer dans src/lib/firebaseClient.ts.
 // Ce module est destine aux composants/pages client qui ont besoin de Firebase Auth,
-// Firestore ou Storage. Les variables NEXT_PUBLIC_* sont exposees au navigateur.
+// Firestore. Les variables NEXT_PUBLIC_* sont exposees au navigateur.
 export const firebaseConfig = {
   apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
   authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
@@ -15,10 +14,8 @@ export const firebaseConfig = {
   appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
 };
 
-// Evite une double initialisation pendant le Hot Reload de Next.js.
-const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
+const app = getApps().length > 0 ? getApp() : initializeApp(firebaseConfig);
 
 export const auth = getAuth(app);
 export const db = getFirestore(app);
-export const storage = getStorage(app);
 export { app };
