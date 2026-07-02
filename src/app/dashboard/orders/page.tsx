@@ -4,8 +4,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
+import { db as firestoreDb } from "@/lib/firebaseClient";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  collection,
+  doc,
+  getDocs,
+  onSnapshot,
+  orderBy,
+  query,
+  updateDoc,
+  where,
+  type QueryDocumentSnapshot,
+} from "firebase/firestore";
 import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw } from "lucide-react";
 
 type DashboardOrder = {
@@ -29,6 +41,11 @@ type DashboardOrder = {
   }[];
 };
 
+type RestaurantRef = {
+  id: string;
+  isSuspended: boolean;
+};
+
 const STATUS_COLUMNS = [
   { id: "pending", label: "En attente", next: "confirmed", action: "Confirmer" },
   { id: "confirmed", label: "Confirmees", next: "preparing", action: "Preparer" },
@@ -36,12 +53,89 @@ const STATUS_COLUMNS = [
   { id: "ready", label: "Pretes", next: "", action: "" },
 ];
 
+function stringValue(value: unknown, fallback = "") {
+  return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+function numberValue(value: unknown, fallback = 0) {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
+  if (typeof value === "string") {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+  }
+  return fallback;
+}
+
+function dateStringValue(value: unknown) {
+  if (typeof value === "string" && value.trim()) return value;
+
+  if (
+    value &&
+    typeof value === "object" &&
+    "toDate" in value &&
+    typeof (value as { toDate: () => Date }).toDate === "function"
+  ) {
+    return (value as { toDate: () => Date }).toDate().toISOString();
+  }
+
+  return new Date().toISOString();
+}
+
+function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
+  const data = docSnap.data() as Record<string, unknown>;
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+
+  const items = rawItems.map((rawLine, index) => {
+    const line =
+      rawLine && typeof rawLine === "object"
+        ? (rawLine as Record<string, unknown>)
+        : {};
+    const rawItem =
+      line.item && typeof line.item === "object"
+        ? (line.item as Record<string, unknown>)
+        : {};
+    const itemId = stringValue(rawItem.id, stringValue(line.itemId, `${docSnap.id}-${index}`));
+    const name = stringValue(rawItem.nameFr, stringValue(line.name, "Plat"));
+
+    return {
+      id: stringValue(line.id, `${docSnap.id}-${index}`),
+      quantity: numberValue(line.quantity, 1),
+      priceAtPurchase: numberValue(line.priceAtPurchase, numberValue(line.price)),
+      item: {
+        id: itemId,
+        nameFr: name,
+        nameEn: stringValue(rawItem.nameEn, name),
+      },
+    };
+  });
+
+  return {
+    id: docSnap.id,
+    tableNumber: stringValue(data.tableNumber, "1"),
+    customerName: stringValue(data.customerName, "Client"),
+    customerPhone: stringValue(data.customerPhone),
+    status: stringValue(data.status, "pending"),
+    totalPrice: numberValue(data.totalPrice),
+    notes: typeof data.notes === "string" && data.notes.trim() ? data.notes : null,
+    createdAt: dateStringValue(data.createdAt),
+    items,
+  };
+}
+
+function ordersQuery(restaurantId: string) {
+  return query(
+    collection(firestoreDb, "orders"),
+    where("restaurantId", "==", restaurantId),
+    orderBy("createdAt", "desc")
+  );
+}
+
 export default function DashboardOrdersPage() {
   const { data: session, status } = useSession();
   const router = useRouter();
   const [orders, setOrders] = useState<DashboardOrder[]>([]);
   const [loading, setLoading] = useState(true);
-  const [restaurantIsSuspended, setRestaurantIsSuspended] = useState(false);
+  const [currentRestaurant, setCurrentRestaurant] = useState<RestaurantRef | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
 
@@ -50,23 +144,89 @@ export default function DashboardOrdersPage() {
     if (status === "authenticated" && session?.user?.role !== "restaurateur") router.push("/admin");
   }, [router, session, status]);
 
-  const fetchOrders = useCallback(async () => {
-    const res = await fetch("/api/dashboard/orders", { cache: "no-store" });
-    if (res.status === 401 || res.status === 403) {
-      router.push("/login");
-      return;
+  useEffect(() => {
+    if (status !== "authenticated" || session?.user?.role !== "restaurateur") return;
+
+    let cancelled = false;
+
+    async function loadRestaurant() {
+      const userId = session?.user?.id;
+      if (!userId) {
+        setCurrentRestaurant(null);
+        setOrders([]);
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const snapshot = await getDocs(
+          query(collection(firestoreDb, "restaurants"), where("userId", "==", userId))
+        );
+        if (cancelled) return;
+
+        const restaurantDoc = snapshot.docs[0];
+        if (!restaurantDoc) {
+          setCurrentRestaurant(null);
+          setOrders([]);
+          setLoading(false);
+          return;
+        }
+
+        const restaurant = restaurantDoc.data() as Record<string, unknown>;
+        setCurrentRestaurant({
+          id: stringValue(restaurant.id, restaurantDoc.id),
+          isSuspended: Boolean(restaurant.isSuspended),
+        });
+      } catch (error) {
+        console.error("Erreur chargement restaurant commandes:", error);
+        if (!cancelled) {
+          setCurrentRestaurant(null);
+          setOrders([]);
+          setLoading(false);
+        }
+      }
     }
-    const payload = await res.json();
-    setOrders(payload.orders || []);
-    setRestaurantIsSuspended(Boolean(payload.restaurantIsSuspended));
-    setLoading(false);
-  }, [router]);
+
+    loadRestaurant();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [session?.user?.id, session?.user?.role, status]);
 
   useEffect(() => {
-    if (status === "authenticated" && session?.user?.role === "restaurateur") {
-      fetchOrders();
+    if (!currentRestaurant?.id) return;
+
+    const unsubscribe = onSnapshot(
+      ordersQuery(currentRestaurant.id),
+      (snapshot) => {
+        setOrders(snapshot.docs.map(normalizeOrder));
+        setLoading(false);
+      },
+      (error) => {
+        console.error("Erreur ecouteur commandes:", error);
+        setOrders([]);
+        setLoading(false);
+      }
+    );
+
+    return () => unsubscribe();
+  }, [currentRestaurant?.id]);
+
+  const refreshOrders = useCallback(async () => {
+    if (!currentRestaurant?.id) return;
+
+    try {
+      setLoading(true);
+      const snapshot = await getDocs(ordersQuery(currentRestaurant.id));
+      setOrders(snapshot.docs.map(normalizeOrder));
+    } catch (error) {
+      console.error("Erreur actualisation commandes:", error);
+    } finally {
+      setLoading(false);
     }
-  }, [fetchOrders, session, status]);
+  }, [currentRestaurant?.id]);
 
   useEffect(() => {
     if (orders.length === 0) return;
@@ -83,15 +243,6 @@ export default function DashboardOrdersPage() {
     if (newest) setLastSeenOrderId(newest);
   }, [lastSeenOrderId, orders]);
 
-  useEffect(() => {
-    if (status !== "authenticated" || session?.user?.role !== "restaurateur") return;
-
-    const interval = window.setInterval(fetchOrders, 8000);
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [fetchOrders, session, status]);
-
   const grouped = useMemo(() => {
     return STATUS_COLUMNS.reduce<Record<string, DashboardOrder[]>>((acc, column) => {
       acc[column.id] = orders.filter((order) => order.status === column.id);
@@ -102,12 +253,10 @@ export default function DashboardOrdersPage() {
   async function updateStatus(orderId: string, status: string) {
     setUpdatingId(orderId);
     try {
-      const res = await fetch(`/api/dashboard/orders/${orderId}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+      await updateDoc(doc(firestoreDb, "orders", orderId), {
+        status,
+        updatedAt: new Date().toISOString(),
       });
-      if (res.ok) await fetchOrders();
     } finally {
       setUpdatingId(null);
     }
@@ -123,7 +272,7 @@ export default function DashboardOrdersPage() {
 
   if (!session || session.user?.role !== "restaurateur") return null;
 
-  if (restaurantIsSuspended) {
+  if (currentRestaurant?.isSuspended) {
     return (
       <div className="min-h-screen bg-background">
         <header className="sticky top-0 z-40 border-b bg-white/90 backdrop-blur-md">
@@ -170,7 +319,7 @@ export default function DashboardOrdersPage() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="outline" size="sm" onClick={fetchOrders}>
+            <Button variant="outline" size="sm" onClick={refreshOrders}>
               <RefreshCw className="mr-1.5 h-4 w-4" />
               Actualiser
             </Button>

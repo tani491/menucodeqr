@@ -129,30 +129,40 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   const restaurantData = restaurantDoc.data() as FirestoreRecord;
   const restaurantId = stringValue(restaurantData.id, restaurantDoc.id);
 
-  const [categoriesSnapshot, itemsSnapshot] = await Promise.all([
+  const [categoriesSnapshot, dishesSnapshot, itemsSnapshot] = await Promise.all([
     getDocs(
       query(collection(db, "categories"), where("restaurantId", "==", restaurantId))
+    ),
+    getDocs(
+      query(collection(db, "dishes"), where("restaurantId", "==", restaurantId))
     ),
     getDocs(
       query(collection(db, "items"), where("restaurantId", "==", restaurantId))
     ),
   ]);
 
-  const items: MenuItem[] = itemsSnapshot.docs
+  const dishIds = new Set(dishesSnapshot.docs.map((dishDoc) => dishDoc.id));
+  const itemDocs = [
+    ...dishesSnapshot.docs,
+    ...itemsSnapshot.docs.filter((itemDoc) => !dishIds.has(itemDoc.id)),
+  ];
+
+  const items: MenuItem[] = itemDocs
     .map((itemDoc) => {
       const item = itemDoc.data() as FirestoreRecord;
+      const status = typeof item.status === "string" ? item.status : "";
 
       return {
         id: stringValue(item.id, itemDoc.id),
-        nameFr: stringValue(item.nameFr),
-        nameEn: stringValue(item.nameEn),
-        descriptionFr: nullableStringValue(item.descriptionFr),
+        nameFr: stringValue(item.nameFr, stringValue(item.name)),
+        nameEn: stringValue(item.nameEn, stringValue(item.name)),
+        descriptionFr: nullableStringValue(item.descriptionFr) || nullableStringValue(item.description),
         descriptionEn: nullableStringValue(item.descriptionEn),
         price: numberValue(item.price),
         imageUrl: nullableStringValue(item.imageUrl),
         videoUrl: nullableStringValue(item.videoUrl),
-        isAvailable: booleanValue(item.isAvailable, true),
-        categoryId: stringValue(item.categoryId),
+        isAvailable: status ? status === "available" : booleanValue(item.isAvailable, true),
+        categoryId: stringValue(item.categoryId, stringValue(item.category)),
         createdAt: sortableDateValue(item.createdAt),
       };
     })

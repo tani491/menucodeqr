@@ -3,6 +3,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { MenuData, MenuCategory, MenuItem, Lang } from "@/lib/menu-data";
+import { db as firestoreDb } from "@/lib/firebaseClient";
+import { addDoc, collection, doc, onSnapshot } from "firebase/firestore";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -40,6 +42,49 @@ type PublicOrder = {
 };
 
 // ─── UI Labels par langue ──────────────────────────────────────────────────
+
+function normalizePublicOrder(id: string, data: Record<string, unknown>): PublicOrder {
+  const rawItems = Array.isArray(data.items) ? data.items : [];
+  const items = rawItems.map((rawLine, index) => {
+    const line =
+      rawLine && typeof rawLine === "object"
+        ? (rawLine as Record<string, unknown>)
+        : {};
+    const rawItem =
+      line.item && typeof line.item === "object"
+        ? (line.item as Record<string, unknown>)
+        : {};
+    const itemName =
+      typeof rawItem.nameFr === "string" && rawItem.nameFr.trim()
+        ? rawItem.nameFr
+        : typeof line.name === "string"
+          ? line.name
+          : "Plat";
+
+    return {
+      id: typeof line.id === "string" ? line.id : `${id}-${index}`,
+      quantity: Number(line.quantity || 1),
+      priceAtPurchase: Number(line.priceAtPurchase || line.price || 0),
+      item: {
+        id: typeof rawItem.id === "string" ? rawItem.id : typeof line.itemId === "string" ? line.itemId : "",
+        nameFr: itemName,
+        nameEn: typeof rawItem.nameEn === "string" && rawItem.nameEn.trim() ? rawItem.nameEn : itemName,
+      },
+    };
+  });
+
+  return {
+    id,
+    tableNumber: typeof data.tableNumber === "string" ? data.tableNumber : "1",
+    customerName: typeof data.customerName === "string" ? data.customerName : "Client",
+    customerPhone: typeof data.customerPhone === "string" ? data.customerPhone : "",
+    status: typeof data.status === "string" ? data.status : "pending",
+    totalPrice: Number(data.totalPrice || 0),
+    notes: typeof data.notes === "string" && data.notes.trim() ? data.notes : null,
+    createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
+    items,
+  };
+}
 
 const LABELS: Record<Lang, { menuSubtitle: string; noDish: string; endOfMenu: string; dishInCategory: (n: number) => string; loadMore: (n: number) => string; loading: string; video: string; unavailable: string }> = {
   fr: {
@@ -862,41 +907,52 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     });
   }, [lang]);
 
-  const refreshActiveOrder = useCallback(async (orderId: string) => {
-    const res = await fetch(`/api/orders/${orderId}`, { cache: "no-store" });
-    if (!res.ok) return;
-    const payload = await res.json();
-    setActiveOrder(payload.order);
-  }, []);
-
   async function handleSubmitOrder(form: { customerName: string; customerPhone: string; notes: string }) {
     if (cart.length === 0 || !tableNumber) return;
     setSubmittingOrder(true);
     try {
-      const res = await fetch("/api/orders", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          restaurantSlug: restaurant.slug,
-          tableNumber,
-          customerName: form.customerName,
-          customerPhone: form.customerPhone,
-          notes: form.notes,
-          items: cart.map((item) => ({
-            itemId: item.itemId,
-            quantity: item.quantity,
-          })),
-        }),
+      const now = new Date().toISOString();
+      const orderItems = cart.map((cartItem) => {
+        const menuItem = allItems.find((item) => item.id === cartItem.itemId);
+
+        return {
+          id: cartItem.itemId,
+          itemId: cartItem.itemId,
+          quantity: cartItem.quantity,
+          priceAtPurchase: cartItem.price,
+          item: {
+            id: cartItem.itemId,
+            nameFr: menuItem?.nameFr || cartItem.name,
+            nameEn: menuItem?.nameEn || cartItem.name,
+          },
+        };
       });
-      const payload = await res.json();
-      if (!res.ok) {
-        alert(payload.error || "Impossible de creer la commande");
-        return;
-      }
-      setActiveOrder(payload.order);
+      const totalPrice = orderItems.reduce(
+        (total, item) => total + item.priceAtPurchase * item.quantity,
+        0
+      );
+      const orderPayload = {
+        restaurantId: restaurant.id,
+        restaurantSlug: restaurant.slug,
+        tableNumber,
+        customerName: form.customerName,
+        customerPhone: form.customerPhone,
+        notes: form.notes || null,
+        status: "pending",
+        totalPrice,
+        items: orderItems,
+        createdAt: now,
+        updatedAt: now,
+      };
+      const orderRef = await addDoc(collection(firestoreDb, "orders"), orderPayload);
+
+      setActiveOrder(normalizePublicOrder(orderRef.id, orderPayload));
       setCart([]);
       window.localStorage.removeItem(cartStorageKey);
       setCheckoutOpen(false);
+    } catch (error) {
+      console.error("Erreur creation commande Firestore:", error);
+      alert("Impossible de creer la commande");
     } finally {
       setSubmittingOrder(false);
     }
@@ -905,14 +961,13 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   useEffect(() => {
     if (!activeOrder?.id) return;
 
-    const interval = window.setInterval(() => {
-      refreshActiveOrder(activeOrder.id);
-    }, 8000);
+    const unsubscribe = onSnapshot(doc(firestoreDb, "orders", activeOrder.id), (snapshot) => {
+      if (!snapshot.exists()) return;
+      setActiveOrder(normalizePublicOrder(snapshot.id, snapshot.data() as Record<string, unknown>));
+    });
 
-    return () => {
-      window.clearInterval(interval);
-    };
-  }, [activeOrder?.id, refreshActiveOrder]);
+    return () => unsubscribe();
+  }, [activeOrder?.id]);
 
   // Intersection Observer pour le scroll infini
   useEffect(() => {

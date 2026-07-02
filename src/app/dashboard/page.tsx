@@ -27,8 +27,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { addDoc, collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
 import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
+import QRCode from "qrcode";
 import {
   Plus,
   Pencil,
@@ -70,6 +71,7 @@ interface MenuItem {
   isAvailable: boolean;
   categoryId: string;
   createdAt: string;
+  sourceCollection?: "dishes" | "items";
 }
 
 interface MenuResponse {
@@ -95,6 +97,7 @@ interface ItemFormData {
   videoUrl: string;
   imageFile: File | null;
   videoFile: File | null;
+  sourceCollection?: "dishes" | "items";
   isAvailable: boolean;
 }
 
@@ -177,8 +180,9 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
   const restaurantData = restaurantDoc.data() as FirestoreRecord;
   const restaurantId = stringValue(restaurantData.id, restaurantDoc.id);
 
-  const [categoriesSnapshot, itemsSnapshot] = await Promise.all([
+  const [categoriesSnapshot, dishesSnapshot, itemsSnapshot] = await Promise.all([
     getDocs(query(collection(firestoreDb, "categories"), where("restaurantId", "==", restaurantId))),
+    getDocs(query(collection(firestoreDb, "dishes"), where("restaurantId", "==", restaurantId))),
     getDocs(query(collection(firestoreDb, "items"), where("restaurantId", "==", restaurantId))),
   ]);
 
@@ -196,22 +200,32 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
     })
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
-  const items: MenuItem[] = itemsSnapshot.docs
-    .map((itemDoc) => {
+  const dishIds = new Set(dishesSnapshot.docs.map((dishDoc) => dishDoc.id));
+  const itemDocs = [
+    ...dishesSnapshot.docs.map((docSnap) => ({ docSnap, sourceCollection: "dishes" as const })),
+    ...itemsSnapshot.docs
+      .filter((docSnap) => !dishIds.has(docSnap.id))
+      .map((docSnap) => ({ docSnap, sourceCollection: "items" as const })),
+  ];
+
+  const items: MenuItem[] = itemDocs
+    .map(({ docSnap: itemDoc, sourceCollection }) => {
       const item = itemDoc.data() as FirestoreRecord;
+      const status = typeof item.status === "string" ? item.status : "";
 
       return {
         id: stringValue(item.id, itemDoc.id),
-        nameFr: stringValue(item.nameFr, "Plat"),
-        nameEn: stringValue(item.nameEn, ""),
-        descriptionFr: nullableStringValue(item.descriptionFr),
+        nameFr: stringValue(item.nameFr, stringValue(item.name, "Plat")),
+        nameEn: stringValue(item.nameEn, stringValue(item.name, "")),
+        descriptionFr: nullableStringValue(item.descriptionFr) || nullableStringValue(item.description),
         descriptionEn: nullableStringValue(item.descriptionEn),
         price: numberValue(item.price),
         imageUrl: nullableStringValue(item.imageUrl),
         videoUrl: nullableStringValue(item.videoUrl),
-        isAvailable: booleanValue(item.isAvailable, true),
-        categoryId: stringValue(item.categoryId),
+        isAvailable: status ? status === "available" : booleanValue(item.isAvailable, true),
+        categoryId: stringValue(item.categoryId, stringValue(item.category)),
         createdAt: dateStringValue(item.createdAt),
+        sourceCollection,
       };
     })
     .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
@@ -254,29 +268,40 @@ function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
 
   useEffect(() => {
     setQrPngUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
       return null;
     });
     setQrSvgUrl((current) => {
-      if (current) URL.revokeObjectURL(current);
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
       return null;
     });
   }, [restaurantSlug, tableNumber]);
 
   const generateQr = useCallback(async (format: "png" | "svg") => {
+    if (!restaurantSlug) {
+      toast.error("Slug restaurant introuvable");
+      return;
+    }
+
     setLoading(true);
     try {
-      const params = new URLSearchParams({ format, table: tableNumber });
-      const res = await fetch(`/api/dashboard/qrcode?${params.toString()}`, {
-        cache: "no-store",
-      });
-      if (!res.ok) throw new Error();
-      const blob = await res.blob();
-      const url = URL.createObjectURL(blob);
+      const targetUrl = `${window.location.origin}/menu/${restaurantSlug}?table=${encodeURIComponent(tableNumber || "1")}`;
+
       if (format === "png") {
-        if (qrPngUrl) URL.revokeObjectURL(qrPngUrl);
+        const url = await QRCode.toDataURL(targetUrl, {
+          width: 1024,
+          margin: 2,
+          errorCorrectionLevel: "M",
+        });
         setQrPngUrl(url);
       } else {
+        const svg = await QRCode.toString(targetUrl, {
+          type: "svg",
+          margin: 2,
+          errorCorrectionLevel: "M",
+        });
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
         if (qrSvgUrl) URL.revokeObjectURL(qrSvgUrl);
         setQrSvgUrl(url);
       }
@@ -285,7 +310,7 @@ function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
     } finally {
       setLoading(false);
     }
-  }, [qrPngUrl, qrSvgUrl, tableNumber]);
+  }, [qrSvgUrl, restaurantSlug, tableNumber]);
 
   const download = useCallback((url: string, filename: string) => {
     const a = document.createElement("a");
@@ -679,6 +704,7 @@ function ItemFormDialog({
           videoUrl: editingItem.videoUrl || "",
           imageFile: null,
           videoFile: null,
+          sourceCollection: editingItem.sourceCollection,
           isAvailable: editingItem.isAvailable,
         }
       : { ...EMPTY_FORM, categoryId: categories[0]?.id || "" }
@@ -954,7 +980,8 @@ export default function DashboardPage() {
   }, []);
 
   const handleToggle = useCallback(
-    async (itemId: string) => {
+    async (targetItem: MenuItem) => {
+      const itemId = targetItem.id;
       setData((prev) =>
         prev
           ? {
@@ -967,7 +994,11 @@ export default function DashboardPage() {
       );
 
       try {
-        await fetch(`/api/dashboard/items/${itemId}/toggle`, { method: "PATCH" });
+        await updateDoc(doc(firestoreDb, targetItem.sourceCollection || "dishes", itemId), {
+          isAvailable: !targetItem.isAvailable,
+          status: targetItem.isAvailable ? "unavailable" : "available",
+          updatedAt: new Date().toISOString(),
+        });
       } catch {
         fetchMenu();
       }
@@ -976,15 +1007,15 @@ export default function DashboardPage() {
   );
 
   const handleDelete = useCallback(
-    async (itemId: string, itemName: string) => {
+    async (targetItem: MenuItem) => {
+      const itemId = targetItem.id;
       setData((prev) =>
         prev ? { ...prev, items: prev.items.filter((item) => item.id !== itemId) } : null
       );
 
       try {
-        const res = await fetch(`/api/dashboard/items/${itemId}`, { method: "DELETE" });
-        if (!res.ok) throw new Error();
-        toast.success(`\"${itemName}\" supprimé`);
+        await deleteDoc(doc(firestoreDb, targetItem.sourceCollection || "dishes", itemId));
+        toast.success(`\"${targetItem.nameFr}\" supprimé`);
       } catch {
         fetchMenu();
         toast.error("Impossible de supprimer le plat");
@@ -1008,26 +1039,30 @@ export default function DashboardPage() {
         : formData.videoUrl || null;
 
       const payload = {
+        name: formData.nameFr,
         nameFr: formData.nameFr,
         nameEn: formData.nameEn || null,
+        description: formData.descriptionFr || null,
         descriptionFr: formData.descriptionFr || null,
         descriptionEn: formData.descriptionEn || null,
         price: parseFloat(formData.price),
+        category: formData.categoryId,
         categoryId: formData.categoryId,
         imageUrl: nextImageUrl,
         videoUrl: nextVideoUrl,
         isAvailable: formData.isAvailable,
+        status: formData.isAvailable ? "available" : "unavailable",
       };
 
       try {
         if (itemId) {
-          await updateDoc(doc(firestoreDb, "items", itemId), {
+          await updateDoc(doc(firestoreDb, formData.sourceCollection || "dishes", itemId), {
             ...payload,
             updatedAt: now,
           });
           toast.success(`\"${payload.nameFr}\" mis à jour`);
         } else {
-          await addDoc(collection(firestoreDb, "items"), {
+          await addDoc(collection(firestoreDb, "dishes"), {
             ...payload,
             restaurantId: data.restaurantId,
             createdAt: now,
@@ -1325,7 +1360,7 @@ export default function DashboardPage() {
                             role="switch"
                             aria-checked={item.isAvailable}
                             aria-label={`Rendre ${item.nameFr} ${item.isAvailable ? "indisponible" : "disponible"}`}
-                            onClick={() => handleToggle(item.id)}
+                            onClick={() => handleToggle(item)}
                             className={`
                               relative inline-flex h-6 w-11 shrink-0 cursor-pointer items-center
                               rounded-full border-2 border-transparent transition-colors duration-200
@@ -1350,7 +1385,7 @@ export default function DashboardPage() {
                             variant="ghost"
                             size="sm"
                             className="h-8 w-8 p-0 text-destructive hover:text-destructive"
-                            onClick={() => handleDelete(item.id, item.nameFr)}
+                            onClick={() => handleDelete(item)}
                           >
                             <Trash2 className="w-3.5 h-3.5" />
                           </Button>
