@@ -138,6 +138,35 @@ function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value : fallback;
 }
 
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return "";
+}
+
+function localStorageValue(key: string) {
+  if (typeof window === "undefined") return "";
+
+  try {
+    return window.localStorage.getItem(key) || "";
+  } catch {
+    return "";
+  }
+}
+
+function rememberActiveRestaurantIds(restaurantId: string, restaurantDocId: string) {
+  if (typeof window === "undefined") return;
+
+  try {
+    if (restaurantId) window.localStorage.setItem("activeRestaurantId", restaurantId);
+    if (restaurantDocId) window.localStorage.setItem("activeRestaurantDocId", restaurantDocId);
+  } catch {
+    // localStorage can be unavailable in private browsing or restricted contexts.
+  }
+}
+
 function nullableStringValue(value: unknown) {
   return typeof value === "string" && value.trim() ? value : null;
 }
@@ -179,7 +208,12 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
   if (!restaurantDoc) return null;
 
   const restaurantData = restaurantDoc.data() as FirestoreRecord;
-  const restaurantId = stringValue(restaurantData.id, restaurantDoc.id);
+  const restaurantId = firstStringValue(
+    restaurantData.id,
+    restaurantData._id,
+    restaurantData.restaurantId,
+    restaurantDoc.id
+  );
 
   const [categoriesSnapshot, dishesSnapshot, itemsSnapshot] = await Promise.all([
     getDocs(query(collection(firestoreDb, "categories"), where("restaurantId", "==", restaurantId))),
@@ -534,13 +568,13 @@ function RestaurantMediaSection({
     setBannerPreview(file ? URL.createObjectURL(file) : null);
   }
 
-  async function uploadRestaurantMedia(file: File, type: "logo" | "banner") {
-    if (!restaurantId) {
+  async function uploadRestaurantMedia(file: File, type: "logo" | "banner", activeRestaurantId: string) {
+    if (!activeRestaurantId) {
       throw new Error("L'identifiant du restaurant est manquant.");
     }
 
     const filename = `${Date.now()}_${cleanStorageFileName(file.name)}`;
-    const fileRef = ref(firebaseStorage, `restaurant-medias/${restaurantId}/${type}/${filename}`);
+    const fileRef = ref(firebaseStorage, `restaurant-medias/${activeRestaurantId}/${type}/${filename}`);
 
     await uploadBytes(fileRef, file, { contentType: file.type });
     return getDownloadURL(fileRef);
@@ -550,13 +584,34 @@ function RestaurantMediaSection({
     setSaving(true);
 
     try {
-      const activeRestaurantDocId = restaurantDocId || restaurantId;
+      const storedRestaurantId = localStorageValue("activeRestaurantId");
+      const storedRestaurantDocId = localStorageValue("activeRestaurantDocId");
+      const activeRestaurantDocId = firstStringValue(
+        restaurantDocId,
+        storedRestaurantDocId,
+        restaurantId,
+        storedRestaurantId
+      );
+      const activeRestaurantId = firstStringValue(
+        restaurantId,
+        storedRestaurantId,
+        activeRestaurantDocId
+      );
+
       if (!activeRestaurantDocId) {
-        throw new Error("ID du restaurant introuvable.");
+        setSaving(false);
+        alert("ERREUR CRITIQUE : Impossible de sauvegarder les medias. L'ID du restaurant est introuvable.");
+        return;
       }
 
-      const nextLogo = logoFile ? await uploadRestaurantMedia(logoFile, "logo") : logo;
-      const nextBanner = bannerFile ? await uploadRestaurantMedia(bannerFile, "banner") : banner;
+      rememberActiveRestaurantIds(activeRestaurantId, activeRestaurantDocId);
+
+      const nextLogo = logoFile
+        ? await uploadRestaurantMedia(logoFile, "logo", activeRestaurantId)
+        : logo;
+      const nextBanner = bannerFile
+        ? await uploadRestaurantMedia(bannerFile, "banner", activeRestaurantId)
+        : banner;
 
       await withTimeout(
         updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), {
@@ -573,6 +628,7 @@ function RestaurantMediaSection({
       );
 
       toast.success("Identite du restaurant mise a jour");
+      alert("Configuration de la marque enregistree avec succes !");
       setLogo(nextLogo || "");
       setBanner(nextBanner || "");
       setLogoFile(null);
@@ -582,6 +638,8 @@ function RestaurantMediaSection({
       void onSaved();
     } catch (error) {
       console.error("Erreur lors de la mise a jour des parametres du restaurant :", error);
+      const message = error instanceof Error ? error.message : "Erreur inconnue";
+      alert(`Erreur Firebase lors de la sauvegarde : ${message}`);
       toast.error("Erreur lors de l'enregistrement.");
     } finally {
       setSaving(false);
@@ -957,6 +1015,7 @@ export default function DashboardPage() {
       }
 
       setSetupPending(false);
+      rememberActiveRestaurantIds(firestoreData.restaurantId, firestoreData.restaurantDocId);
       setData(firestoreData);
     } catch (err) {
       console.error("Erreur lors du chargement du restaurant:", err);
@@ -1034,11 +1093,22 @@ export default function DashboardPage() {
   const handleFormSubmit = useCallback(
     async (formData: ItemFormData, itemId?: string) => {
       try {
-        const activeRestaurantId = data?.restaurantId;
+        const activeRestaurantId = firstStringValue(
+          data?.restaurantId,
+          data?.restaurantDocId,
+          localStorageValue("activeRestaurantId"),
+          localStorageValue("activeRestaurantDocId")
+        );
+
         if (!activeRestaurantId) {
-          console.error("Impossible d'ajouter le plat : currentRestaurant.id est indefini");
-          throw new Error("L'identifiant du restaurant est manquant.");
+          console.error("Erreur : activeRestaurantId est introuvable.", { dashboardRestaurant: data });
+          alert(
+            "ERREUR CRITIQUE : Impossible de creer le plat car l'ID du restaurant est introuvable (undefined). Verifie l'etat de currentRestaurant."
+          );
+          return;
         }
+
+        rememberActiveRestaurantIds(activeRestaurantId, data?.restaurantDocId || activeRestaurantId);
 
         const price = Number(formData.price);
         if (!Number.isFinite(price)) {
@@ -1123,6 +1193,7 @@ export default function DashboardPage() {
               : prev
           );
           toast.success(`\"${payload.nameFr}\" ajouté au menu`);
+          alert("Plat ajoute avec succes !");
         }
 
         setDialogOpen(false);
@@ -1130,6 +1201,8 @@ export default function DashboardPage() {
         void fetchMenu();
       } catch (error) {
         console.error("Erreur critique lors de la creation du plat dans Firestore :", error);
+        const message = error instanceof Error ? error.message : "Erreur inconnue";
+        alert(`Erreur Firebase lors de l'ajout : ${message}`);
         toast.error(
           itemId
             ? "Erreur de mise a jour du plat."
@@ -1137,7 +1210,7 @@ export default function DashboardPage() {
         );
       }
     },
-    [data?.restaurantId, fetchMenu]
+    [data, fetchMenu]
   );
 
   // ─── Loading / Protection ─────────────────────────────────────────────
