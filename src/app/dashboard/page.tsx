@@ -481,11 +481,13 @@ function FileUploadField({
 // ─── Item Form Dialog ──────────────────────────────────────────────────────
 
 function RestaurantMediaSection({
+  restaurantId,
   logoUrl,
   bannerUrl,
   primaryColor: savedPrimaryColor,
   onSaved,
 }: {
+  restaurantId: string;
   logoUrl: string | null | undefined;
   bannerUrl: string | null | undefined;
   primaryColor: string | undefined;
@@ -525,30 +527,24 @@ function RestaurantMediaSection({
     setBannerPreview(file ? URL.createObjectURL(file) : null);
   }
 
-  async function uploadRestaurantMedia(file: File) {
-    const form = new FormData();
-    form.append("file", file);
-    form.append("purpose", "restaurant-media");
-
-    const res = await fetch("/api/dashboard/upload", {
-      method: "POST",
-      body: form,
-    });
-    const data = await res.json();
-
-    if (!res.ok) {
-      throw new Error(data.error || "Upload failed");
+  async function uploadRestaurantMedia(file: File, type: "logo" | "banner") {
+    if (!restaurantId) {
+      throw new Error("L'identifiant du restaurant est manquant.");
     }
 
-    return data.url as string;
+    const filename = `${Date.now()}_${cleanStorageFileName(file.name)}`;
+    const fileRef = ref(firebaseStorage, `restaurant-medias/${restaurantId}/${type}/${filename}`);
+
+    await uploadBytes(fileRef, file, { contentType: file.type });
+    return getDownloadURL(fileRef);
   }
 
   async function handleSave() {
     setSaving(true);
 
     try {
-      const nextLogo = logoFile ? await uploadRestaurantMedia(logoFile) : logo;
-      const nextBanner = bannerFile ? await uploadRestaurantMedia(bannerFile) : banner;
+      const nextLogo = logoFile ? await uploadRestaurantMedia(logoFile, "logo") : logo;
+      const nextBanner = bannerFile ? await uploadRestaurantMedia(bannerFile, "banner") : banner;
 
       const res = await fetch("/api/dashboard/restaurant", {
         method: "PATCH",
@@ -1263,6 +1259,7 @@ export default function DashboardPage() {
         <Separator />
 
         <RestaurantMediaSection
+          restaurantId={data.restaurantId}
           logoUrl={data.restaurantLogoUrl}
           bannerUrl={data.restaurantBannerUrl}
           primaryColor={data.restaurantPrimaryColor}
