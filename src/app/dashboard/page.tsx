@@ -1026,57 +1026,75 @@ export default function DashboardPage() {
 
   const handleFormSubmit = useCallback(
     async (formData: ItemFormData, itemId?: string) => {
-      if (!data?.restaurantId) {
-        throw new Error("Restaurant introuvable");
-      }
-
-      const now = new Date().toISOString();
-      const nextImageUrl = formData.imageFile
-        ? await uploadDishFile(formData.imageFile, data.restaurantId, "images")
-        : formData.imageUrl || null;
-      const nextVideoUrl = formData.videoFile
-        ? await uploadDishFile(formData.videoFile, data.restaurantId, "videos")
-        : formData.videoUrl || null;
-
-      const payload = {
-        name: formData.nameFr,
-        nameFr: formData.nameFr,
-        nameEn: formData.nameEn || null,
-        description: formData.descriptionFr || null,
-        descriptionFr: formData.descriptionFr || null,
-        descriptionEn: formData.descriptionEn || null,
-        price: parseFloat(formData.price),
-        category: formData.categoryId,
-        categoryId: formData.categoryId,
-        imageUrl: nextImageUrl,
-        videoUrl: nextVideoUrl,
-        isAvailable: formData.isAvailable,
-        status: formData.isAvailable ? "available" : "unavailable",
-      };
-
       try {
+        const currentRestaurantId = data?.restaurantId;
+        if (!currentRestaurantId) {
+          throw new Error("L'identifiant du restaurant est manquant.");
+        }
+
+        const price = Number(formData.price);
+        if (!Number.isFinite(price)) {
+          throw new Error("Le prix du plat est invalide.");
+        }
+
+        const now = new Date().toISOString();
+        const nextImageUrl = formData.imageFile
+          ? await uploadDishFile(formData.imageFile, currentRestaurantId, "images")
+          : formData.imageUrl || null;
+        const nextVideoUrl = formData.videoFile
+          ? await uploadDishFile(formData.videoFile, currentRestaurantId, "videos")
+          : formData.videoUrl || null;
+
+        const payload = {
+          name: formData.nameFr.trim(),
+          nameFr: formData.nameFr.trim(),
+          nameEn: formData.nameEn.trim() || null,
+          description: formData.descriptionFr.trim() || null,
+          descriptionFr: formData.descriptionFr.trim() || null,
+          descriptionEn: formData.descriptionEn.trim() || null,
+          price,
+          category: formData.categoryId,
+          categoryId: formData.categoryId,
+          imageUrl: nextImageUrl,
+          videoUrl: nextVideoUrl || null,
+          isAvailable: formData.isAvailable,
+          status: formData.isAvailable ? "available" : "unavailable",
+        };
+
         if (itemId) {
-          await updateDoc(doc(firestoreDb, formData.sourceCollection || "dishes", itemId), {
-            ...payload,
-            updatedAt: now,
-          });
+          await withTimeout(
+            updateDoc(doc(firestoreDb, formData.sourceCollection || "dishes", itemId), {
+              ...payload,
+              updatedAt: now,
+            }),
+            FIRESTORE_DASHBOARD_TIMEOUT_MS,
+            "Delai depasse lors de la mise a jour du plat."
+          );
           toast.success(`\"${payload.nameFr}\" mis à jour`);
         } else {
-          await addDoc(collection(firestoreDb, "dishes"), {
-            ...payload,
-            restaurantId: data.restaurantId,
-            createdAt: now,
-            updatedAt: now,
-          });
+          await withTimeout(
+            addDoc(collection(firestoreDb, "dishes"), {
+              ...payload,
+              restaurantId: currentRestaurantId,
+              createdAt: now,
+              updatedAt: now,
+            }),
+            FIRESTORE_DASHBOARD_TIMEOUT_MS,
+            "Delai depasse lors de la creation du plat."
+          );
           toast.success(`\"${payload.nameFr}\" ajouté au menu`);
         }
 
         setDialogOpen(false);
         setEditingItem(null);
-        await fetchMenu();
+        void fetchMenu();
       } catch (error) {
-        console.error("Erreur lors de l'ajout du plat :", error);
-        toast.error(itemId ? "Erreur de mise à jour" : "Erreur d\u2019ajout");
+        console.error("Erreur critique lors de la creation du plat dans Firestore :", error);
+        toast.error(
+          itemId
+            ? "Erreur de mise a jour du plat."
+            : "Erreur lors de la creation du plat. Verifie les donnees."
+        );
       }
     },
     [data?.restaurantId, fetchMenu]
