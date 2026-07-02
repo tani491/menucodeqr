@@ -136,6 +136,7 @@ export default function DashboardOrdersPage() {
   const [orders, setOrders] = useState<DashboardOrder[]>([]);
   const [loading, setLoading] = useState(true);
   const [currentRestaurant, setCurrentRestaurant] = useState<RestaurantRef | null>(null);
+  const [restaurantResolved, setRestaurantResolved] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
 
@@ -154,12 +155,14 @@ export default function DashboardOrdersPage() {
       if (!userId) {
         setCurrentRestaurant(null);
         setOrders([]);
+        setRestaurantResolved(true);
         setLoading(false);
         return;
       }
 
       try {
         setLoading(true);
+        setRestaurantResolved(false);
         const snapshot = await getDocs(
           query(collection(firestoreDb, "restaurants"), where("userId", "==", userId))
         );
@@ -169,6 +172,7 @@ export default function DashboardOrdersPage() {
         if (!restaurantDoc) {
           setCurrentRestaurant(null);
           setOrders([]);
+          setRestaurantResolved(true);
           setLoading(false);
           return;
         }
@@ -178,11 +182,13 @@ export default function DashboardOrdersPage() {
           id: stringValue(restaurant.id, restaurantDoc.id),
           isSuspended: Boolean(restaurant.isSuspended),
         });
+        setRestaurantResolved(true);
       } catch (error) {
         console.error("Erreur chargement restaurant commandes:", error);
         if (!cancelled) {
           setCurrentRestaurant(null);
           setOrders([]);
+          setRestaurantResolved(true);
           setLoading(false);
         }
       }
@@ -196,23 +202,32 @@ export default function DashboardOrdersPage() {
   }, [session?.user?.id, session?.user?.role, status]);
 
   useEffect(() => {
-    if (!currentRestaurant?.id) return;
+    if (!currentRestaurant?.id) {
+      if (restaurantResolved) setLoading(false);
+      return;
+    }
 
-    const unsubscribe = onSnapshot(
-      ordersQuery(currentRestaurant.id),
-      (snapshot) => {
-        setOrders(snapshot.docs.map(normalizeOrder));
-        setLoading(false);
-      },
-      (error) => {
-        console.error("Erreur ecouteur commandes:", error);
-        setOrders([]);
-        setLoading(false);
-      }
-    );
+    try {
+      setLoading(true);
+      const unsubscribe = onSnapshot(
+        ordersQuery(currentRestaurant.id),
+        (snapshot) => {
+          setOrders(snapshot.docs.map(normalizeOrder));
+          setLoading(false);
+        },
+        (error) => {
+          console.error("Erreur ecouteur Firestore orders:", error);
+          setOrders([]);
+          setLoading(false);
+        }
+      );
 
-    return () => unsubscribe();
-  }, [currentRestaurant?.id]);
+      return () => unsubscribe();
+    } catch (error) {
+      console.error("Erreur globale useEffect orders:", error);
+      setLoading(false);
+    }
+  }, [currentRestaurant, restaurantResolved]);
 
   const refreshOrders = useCallback(async () => {
     if (!currentRestaurant?.id) return;
