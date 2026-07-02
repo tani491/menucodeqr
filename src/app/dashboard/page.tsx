@@ -1205,8 +1205,21 @@ export default function DashboardPage() {
           </div>
 
           {/* Liste par catégorie */}
-          <div className="space-y-6">
-            {itemsByCategory.map(({ category, items }) => (
+          {data.items.length === 0 ? (
+            <div className="rounded-lg border border-dashed p-8 text-center">
+              <Package className="mx-auto mb-3 h-8 w-8 text-muted-foreground/50" />
+              <h3 className="text-sm font-semibold">Votre menu est vide, ajoutez votre premier plat !</h3>
+              <p className="mx-auto mt-2 max-w-md text-sm text-muted-foreground">
+                Les categories sont chargees depuis Firestore. Ajoutez un plat pour commencer a composer votre menu public.
+              </p>
+              <Button onClick={openCreate} size="sm" className="mt-4">
+                <Plus className="w-4 h-4 mr-1.5" />
+                Ajouter un plat
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              {itemsByCategory.map(({ category, items }) => (
               <section key={category.id} aria-label={category.nameFr}>
                 <div className="flex items-center gap-2 mb-3">
                   <h3 className="font-semibold text-sm">{category.nameFr} <span className="text-muted-foreground font-normal">/ {category.nameEn}</span></h3>
@@ -1318,8 +1331,9 @@ export default function DashboardPage() {
                   </div>
                 )}
               </section>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       </main>
 
