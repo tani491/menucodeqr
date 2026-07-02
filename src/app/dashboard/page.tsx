@@ -78,6 +78,7 @@ interface MenuResponse {
   categories: Category[];
   items: MenuItem[];
   restaurantId: string;
+  restaurantDocId: string;
   restaurantName?: string;
   restaurantSlug?: string;
   restaurantLogoUrl?: string | null;
@@ -234,6 +235,7 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
     categories,
     items,
     restaurantId,
+    restaurantDocId: restaurantDoc.id,
     restaurantName: stringValue(restaurantData.name, "Restaurant"),
     restaurantSlug: stringValue(restaurantData.slug),
     restaurantLogoUrl: nullableStringValue(restaurantData.logoUrl),
@@ -485,12 +487,14 @@ function FileUploadField({
 
 function RestaurantMediaSection({
   restaurantId,
+  restaurantDocId,
   logoUrl,
   bannerUrl,
   primaryColor: savedPrimaryColor,
   onSaved,
 }: {
   restaurantId: string;
+  restaurantDocId: string;
   logoUrl: string | null | undefined;
   bannerUrl: string | null | undefined;
   primaryColor: string | undefined;
@@ -546,24 +550,27 @@ function RestaurantMediaSection({
     setSaving(true);
 
     try {
+      const activeRestaurantDocId = restaurantDocId || restaurantId;
+      if (!activeRestaurantDocId) {
+        throw new Error("ID du restaurant introuvable.");
+      }
+
       const nextLogo = logoFile ? await uploadRestaurantMedia(logoFile, "logo") : logo;
       const nextBanner = bannerFile ? await uploadRestaurantMedia(bannerFile, "banner") : banner;
 
-      const res = await fetch("/api/dashboard/restaurant", {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
+      await withTimeout(
+        updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), {
           logoUrl: nextLogo || null,
           bannerUrl: nextBanner || null,
+          banniereUrl: nextBanner || null,
           primaryColor,
+          couleur: primaryColor,
+          color: primaryColor,
+          updatedAt: new Date().toISOString(),
         }),
-      });
-      const data = await res.json();
-
-      if (!res.ok) {
-        toast.error(data.error || "Erreur de mise a jour");
-        return;
-      }
+        FIRESTORE_DASHBOARD_TIMEOUT_MS,
+        "Delai depasse lors de l'enregistrement des medias."
+      );
 
       toast.success("Identite du restaurant mise a jour");
       setLogo(nextLogo || "");
@@ -572,9 +579,10 @@ function RestaurantMediaSection({
       setBannerFile(null);
       selectLogo(null);
       selectBanner(null);
-      onSaved();
-    } catch {
-      toast.error("Erreur reseau");
+      void onSaved();
+    } catch (error) {
+      console.error("Erreur lors de la mise a jour des parametres du restaurant :", error);
+      toast.error("Erreur lors de l'enregistrement.");
     } finally {
       setSaving(false);
     }
@@ -1296,6 +1304,7 @@ export default function DashboardPage() {
 
         <RestaurantMediaSection
           restaurantId={data.restaurantId}
+          restaurantDocId={data.restaurantDocId}
           logoUrl={data.restaurantLogoUrl}
           bannerUrl={data.restaurantBannerUrl}
           primaryColor={data.restaurantPrimaryColor}
