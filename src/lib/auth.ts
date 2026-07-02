@@ -34,6 +34,16 @@ type AdminCompat = {
 
 const adminCompat = admin as unknown as AdminCompat;
 
+const FIREBASE_PROJECT_ID = "codeqrmenu-525a7";
+const FIREBASE_PUBLIC_CONFIG: FirebaseOptions = {
+  apiKey: "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU",
+  authDomain: "codeqrmenu-525a7.firebaseapp.com",
+  projectId: FIREBASE_PROJECT_ID,
+  storageBucket: "codeqrmenu-525a7.firebasestorage.app",
+  messagingSenderId: "942948658860",
+  appId: "1:942948658860:web:989313482a946d96a1f909",
+};
+
 declare module "next-auth" {
   interface Session extends DefaultSession {
     user: {
@@ -64,19 +74,10 @@ function getStringEnv(name: string) {
 
 function getFirebaseClientAuth() {
   try {
-    const firebaseConfig: FirebaseOptions = {
-      apiKey: getStringEnv("NEXT_PUBLIC_FIREBASE_API_KEY"),
-      authDomain: getStringEnv("NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN"),
-      projectId: getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID"),
-      storageBucket: getStringEnv("NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET"),
-      messagingSenderId: getStringEnv("NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID"),
-      appId: getStringEnv("NEXT_PUBLIC_FIREBASE_APP_ID"),
-    };
-
     const firebaseApps = typeof getApps === "function" ? getApps() : [];
     const app = Array.isArray(firebaseApps) && firebaseApps[0]
       ? firebaseApps[0]
-      : initializeApp(firebaseConfig);
+      : initializeApp(FIREBASE_PUBLIC_CONFIG);
 
     return getAuth(app);
   } catch (error) {
@@ -87,7 +88,7 @@ function getFirebaseClientAuth() {
 
 function getFirebaseAdminFirestore(): SafeFirestore | null {
   try {
-    const projectId = getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
+    const projectId = FIREBASE_PROJECT_ID;
     const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
     const privateKey = process.env.FIREBASE_PRIVATE_KEY
       ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
@@ -142,7 +143,7 @@ function normalizeRole(role: unknown) {
 
 function getAdminCompatFirestore(): SafeFirestore | null {
   try {
-    const projectId = getStringEnv("NEXT_PUBLIC_FIREBASE_PROJECT_ID");
+    const projectId = FIREBASE_PROJECT_ID;
     const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
     const privateKey = process.env.FIREBASE_PRIVATE_KEY
       ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
@@ -269,7 +270,7 @@ export const authOptions: NextAuthOptions = {
           let userData: Record<string, unknown> = {};
 
           try {
-            userData = userDoc.data() || {};
+            userData = typeof userDoc.data === "function" ? userDoc.data() || {} : {};
           } catch (error) {
             console.error("NextAuth Firestore Data Error:", error);
             return fallbackUser;

@@ -1,5 +1,5 @@
 export async function verifyFirebaseEmailPassword(email: string, password: string) {
-  const apiKey = process.env.NEXT_PUBLIC_FIREBASE_API_KEY;
+  const apiKey = "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU";
 
   if (!apiKey) {
     return null;

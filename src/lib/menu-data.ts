@@ -58,12 +58,12 @@ function getMenuFirestoreDb() {
   }
 
   const firebaseConfig = {
-    apiKey: process.env.NEXT_PUBLIC_FIREBASE_API_KEY,
-    authDomain: process.env.NEXT_PUBLIC_FIREBASE_AUTH_DOMAIN,
-    projectId: process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID,
-    storageBucket: process.env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET,
-    messagingSenderId: process.env.NEXT_PUBLIC_FIREBASE_MESSAGING_SENDER_ID,
-    appId: process.env.NEXT_PUBLIC_FIREBASE_APP_ID,
+    apiKey: "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU",
+    authDomain: "codeqrmenu-525a7.firebaseapp.com",
+    projectId: "codeqrmenu-525a7",
+    storageBucket: "codeqrmenu-525a7.firebasestorage.app",
+    messagingSenderId: "942948658860",
+    appId: "1:942948658860:web:989313482a946d96a1f909",
   };
 
   if (!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.appId) {

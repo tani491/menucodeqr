@@ -597,9 +597,9 @@ function RestaurantMediaSection({
 
       await withTimeout(
         updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), {
-          logoUrl: nextLogo || null,
-          bannerUrl: nextBanner || null,
-          banniereUrl: nextBanner || null,
+          logoUrl: nextLogo || "",
+          bannerUrl: nextBanner || "",
+          banniereUrl: nextBanner || "",
           primaryColor,
           couleur: primaryColor,
           color: primaryColor,
