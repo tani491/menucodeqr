@@ -238,7 +238,10 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
     restaurantSlug: stringValue(restaurantData.slug),
     restaurantLogoUrl: nullableStringValue(restaurantData.logoUrl),
     restaurantBannerUrl: nullableStringValue(restaurantData.bannerUrl),
-    restaurantPrimaryColor: stringValue(restaurantData.primaryColor, "#000000"),
+    restaurantPrimaryColor: stringValue(
+      restaurantData.primaryColor,
+      stringValue(restaurantData.couleur, stringValue(restaurantData.color, "#000000"))
+    ),
     restaurantIsSuspended: booleanValue(restaurantData.isSuspended),
   };
 }
@@ -1023,8 +1026,9 @@ export default function DashboardPage() {
   const handleFormSubmit = useCallback(
     async (formData: ItemFormData, itemId?: string) => {
       try {
-        const currentRestaurantId = data?.restaurantId;
-        if (!currentRestaurantId) {
+        const activeRestaurantId = data?.restaurantId;
+        if (!activeRestaurantId) {
+          console.error("Impossible d'ajouter le plat : currentRestaurant.id est indefini");
           throw new Error("L'identifiant du restaurant est manquant.");
         }
 
@@ -1035,10 +1039,18 @@ export default function DashboardPage() {
 
         const now = new Date().toISOString();
         const nextImageUrl = formData.imageFile
-          ? await uploadDishFile(formData.imageFile, currentRestaurantId, "images")
+          ? await withTimeout(
+              uploadDishFile(formData.imageFile, activeRestaurantId, "images"),
+              FIRESTORE_DASHBOARD_TIMEOUT_MS,
+              "Delai depasse lors de l'upload de l'image du plat."
+            )
           : formData.imageUrl || null;
         const nextVideoUrl = formData.videoFile
-          ? await uploadDishFile(formData.videoFile, currentRestaurantId, "videos")
+          ? await withTimeout(
+              uploadDishFile(formData.videoFile, activeRestaurantId, "videos"),
+              FIRESTORE_DASHBOARD_TIMEOUT_MS,
+              "Delai depasse lors de l'upload de la video du plat."
+            )
           : formData.videoUrl || null;
 
         const payload = {
@@ -1068,15 +1080,39 @@ export default function DashboardPage() {
           );
           toast.success(`\"${payload.nameFr}\" mis à jour`);
         } else {
-          await withTimeout(
+          const createdDishRef = await withTimeout(
             addDoc(collection(firestoreDb, "dishes"), {
               ...payload,
-              restaurantId: currentRestaurantId,
+              restaurantId: activeRestaurantId,
               createdAt: now,
               updatedAt: now,
             }),
             FIRESTORE_DASHBOARD_TIMEOUT_MS,
             "Delai depasse lors de la creation du plat."
+          );
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  items: [
+                    ...prev.items,
+                    {
+                      id: createdDishRef.id,
+                      nameFr: payload.nameFr,
+                      nameEn: payload.nameEn || "",
+                      descriptionFr: payload.descriptionFr,
+                      descriptionEn: payload.descriptionEn,
+                      price: payload.price,
+                      imageUrl: payload.imageUrl,
+                      videoUrl: payload.videoUrl,
+                      isAvailable: payload.isAvailable,
+                      categoryId: payload.categoryId,
+                      createdAt: now,
+                      sourceCollection: "dishes",
+                    },
+                  ],
+                }
+              : prev
           );
           toast.success(`\"${payload.nameFr}\" ajouté au menu`);
         }

@@ -84,6 +84,25 @@ function nullableStringValue(value: unknown) {
   return typeof value === "string" && value.length > 0 ? value : null;
 }
 
+function firstStringValue(...values: unknown[]) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+
+  return "";
+}
+
+function restaurantColorValue(restaurant: FirestoreRecord) {
+  return (
+    firstStringValue(
+      restaurant.primaryColor,
+      restaurant.couleur,
+      restaurant.color,
+      "#000000"
+    ) || "#000000"
+  );
+}
+
 function numberValue(value: unknown, fallback = 0) {
   return typeof value === "number" && Number.isFinite(value) ? value : fallback;
 }
@@ -196,7 +215,7 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
       name: stringValue(restaurantData.name),
       logoUrl: nullableStringValue(restaurantData.logoUrl),
       bannerUrl: nullableStringValue(restaurantData.bannerUrl),
-      primaryColor: stringValue(restaurantData.primaryColor, "#000000"),
+      primaryColor: restaurantColorValue(restaurantData),
       isSuspended: booleanValue(restaurantData.isSuspended),
     },
     categories,

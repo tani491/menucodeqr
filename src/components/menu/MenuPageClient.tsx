@@ -126,7 +126,15 @@ function localItemDesc(item: MenuItem, lang: Lang) {
 
 // ─── LanguageToggle ─────────────────────────────────────────────────────────
 
-function LanguageToggle({ lang, onLangChange }: { lang: Lang; onLangChange: (l: Lang) => void }) {
+function LanguageToggle({
+  lang,
+  onLangChange,
+  brandColor,
+}: {
+  lang: Lang;
+  onLangChange: (l: Lang) => void;
+  brandColor: string;
+}) {
   return (
     <div className="inline-flex items-center rounded-full border bg-white/90 backdrop-blur-sm p-0.5 shadow-sm">
       {(["fr", "en"] as const).map((l) => (
@@ -136,10 +144,11 @@ function LanguageToggle({ lang, onLangChange }: { lang: Lang; onLangChange: (l: 
           className={`
             px-3 py-1 rounded-full text-xs font-semibold transition-all duration-200
             ${lang === l
-              ? "bg-primary text-primary-foreground shadow-sm"
+              ? "text-white shadow-sm"
               : "text-muted-foreground hover:text-foreground"
             }
           `}
+          style={lang === l ? { backgroundColor: brandColor } : undefined}
           aria-pressed={lang === l}
         >
           {l === "fr" ? "FR" : "EN"}
@@ -151,7 +160,13 @@ function LanguageToggle({ lang, onLangChange }: { lang: Lang; onLangChange: (l: 
 
 // ─── RestaurantHeader ──────────────────────────────────────────────────────
 
-function RestaurantHeader({ restaurant }: { restaurant: MenuData["restaurant"] }) {
+function RestaurantHeader({
+  restaurant,
+  brandColor,
+}: {
+  restaurant: MenuData["restaurant"];
+  brandColor: string;
+}) {
   return (
     <header className="relative w-full">
       {/* Bannière */}
@@ -185,7 +200,9 @@ function RestaurantHeader({ restaurant }: { restaurant: MenuData["restaurant"] }
         )}
         <div className="flex-1 min-w-0 pb-1">
           <h1 className="text-xl sm:text-2xl font-bold text-black drop-shadow-md truncate">
-            {restaurant.name}
+            <span style={!restaurant.bannerUrl ? { color: brandColor } : undefined}>
+              {restaurant.name}
+            </span>
           </h1>
           <p className="text-sm text-white/80 drop-shadow-sm mt-0.5">
             {/* menuSubtitle is rendered in CategoryBar with lang context */}
@@ -267,11 +284,13 @@ function MenuItemCard({
   item,
   lang,
   labels,
+  brandColor,
   onSelect,
 }: {
   item: MenuItem;
   lang: Lang;
   labels: typeof LABELS.fr;
+  brandColor: string;
   onSelect: (item: MenuItem) => void;
 }) {
   const unavailable = !item.isAvailable;
@@ -360,8 +379,9 @@ function MenuItemCard({
             </h3>
             <span
               className={`flex-shrink-0 font-bold text-sm sm:text-base tabular-nums ${
-                unavailable ? "text-muted-foreground" : "text-primary"
+                unavailable ? "text-muted-foreground" : ""
               }`}
+              style={!unavailable ? { color: brandColor } : undefined}
             >
               {item.price.toLocaleString("fr-FR")} FCFA
             </span>
@@ -380,7 +400,10 @@ function MenuItemCard({
         {/* Badges */}
         <div className="flex items-center gap-1.5 mt-1">
           {hasVideo && !unavailable && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary">
+            <span
+              className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium"
+              style={{ color: brandColor }}
+            >
               <svg className="w-2.5 h-2.5" fill="currentColor" viewBox="0 0 24 24">
                 <path d="M8 5v14l11-7z" />
               </svg>
@@ -989,14 +1012,14 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
 
   return (
     <div className="min-h-screen bg-background">
-      <RestaurantHeader restaurant={restaurant} />
+      <RestaurantHeader restaurant={restaurant} brandColor={brandColor} />
 
       {/* Bande titre + toggle langue */}
       <div className="flex items-center justify-between px-4 py-2 bg-white/90 border-b border-border/50">
         <p className="text-sm text-muted-foreground truncate">
           {labels.menuSubtitle}
         </p>
-        <LanguageToggle lang={lang} onLangChange={setLang} />
+        <LanguageToggle lang={lang} onLangChange={setLang} brandColor={brandColor} />
       </div>
 
       <CategoryBar
@@ -1025,6 +1048,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
             item={item}
             lang={lang}
             labels={labels}
+            brandColor={brandColor}
             onSelect={setSelectedItem}
           />
         ))}
