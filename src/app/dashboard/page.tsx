@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { db as firestoreDb } from "@/lib/firebaseClient";
+import { db as firestoreDb, storage as firebaseStorage } from "@/lib/firebaseClient";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -27,7 +27,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { collection, getDocs, query, where } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { getDownloadURL, ref, uploadBytes } from "firebase/storage";
 import {
   Plus,
   Pencil,
@@ -92,6 +93,8 @@ interface ItemFormData {
   categoryId: string;
   imageUrl: string;
   videoUrl: string;
+  imageFile: File | null;
+  videoFile: File | null;
   isAvailable: boolean;
 }
 
@@ -104,6 +107,8 @@ const EMPTY_FORM: ItemFormData = {
   categoryId: "",
   imageUrl: "",
   videoUrl: "",
+  imageFile: null,
+  videoFile: null,
   isAvailable: true,
 };
 
@@ -222,6 +227,23 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
     restaurantPrimaryColor: stringValue(restaurantData.primaryColor, "#000000"),
     restaurantIsSuspended: booleanValue(restaurantData.isSuspended),
   };
+}
+
+function cleanStorageFileName(name: string) {
+  return name
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]/g, "-")
+    .replace(/-+/g, "-")
+    .slice(0, 120);
+}
+
+async function uploadDishFile(file: File, restaurantId: string, type: "images" | "videos") {
+  const filename = `${Date.now()}_${cleanStorageFileName(file.name)}`;
+  const fileRef = ref(firebaseStorage, `dishes/${restaurantId}/${type}/${filename}`);
+
+  await uploadBytes(fileRef, file, { contentType: file.type });
+  return getDownloadURL(fileRef);
 }
 
 function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
@@ -359,48 +381,31 @@ function FileUploadField({
   maxSizeMb,
   value,
   onChange,
+  disabled = false,
   icon: Icon,
 }: {
   label: string;
   accept: string;
   maxSizeMb: number;
   value: string;
-  onChange: (url: string) => void;
+  onChange: (file: File | null) => void;
+  disabled?: boolean;
   icon: React.ElementType;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const [uploading, setUploading] = useState(false);
 
-  async function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
+  function handleFile(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0];
     if (!file) return;
 
     if (file.size > maxSizeMb * 1024 * 1024) {
       toast.error(`Fichier trop volumineux (max ${maxSizeMb} Mo)`);
+      if (fileRef.current) fileRef.current.value = "";
       return;
     }
 
-    setUploading(true);
-    try {
-      const form = new FormData();
-      form.append("file", file);
-      const res = await fetch("/api/dashboard/upload", {
-        method: "POST",
-        body: form,
-      });
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Upload failed");
-      }
-      const data = await res.json();
-      onChange(data.url);
-      toast.success("Fichier uploadé");
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erreur d’upload");
-    } finally {
-      setUploading(false);
-      if (fileRef.current) fileRef.current.value = "";
-    }
+    onChange(file);
+    if (fileRef.current) fileRef.current.value = "";
   }
 
   return (
@@ -412,17 +417,17 @@ function FileUploadField({
           type="file"
           accept={accept}
           onChange={handleFile}
-          disabled={uploading}
+          disabled={disabled}
           className="flex-1 text-sm"
         />
         <Button
           type="button"
           variant="outline"
           size="sm"
-          disabled={uploading}
+          disabled={disabled}
           onClick={() => fileRef.current?.click()}
         >
-          {uploading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Upload className="w-4 h-4" />}
+          <Upload className="w-4 h-4" />
         </Button>
         {value && (
           <Button
@@ -430,7 +435,8 @@ function FileUploadField({
             variant="ghost"
             size="sm"
             className="text-destructive hover:text-destructive"
-            onClick={() => onChange("")}
+            disabled={disabled}
+            onClick={() => onChange(null)}
           >
             <X className="w-4 h-4" />
           </Button>
@@ -438,11 +444,7 @@ function FileUploadField({
       </div>
       {value && (
         <div className="flex items-center gap-2">
-          {accept.includes("video") ? (
-            <Video className="w-3.5 h-3.5 text-muted-foreground" />
-          ) : (
-            <ImageIcon className="w-3.5 h-3.5 text-muted-foreground" />
-          )}
+          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
           <span className="text-xs text-muted-foreground truncate max-w-[300px]">{value}</span>
           <Check className="w-3.5 h-3.5 text-green-600" />
         </div>
@@ -659,7 +661,7 @@ function ItemFormDialog({
 }: {
   categories: Category[];
   editingItem: MenuItem | null;
-  onSubmit: (data: ItemFormData, id?: string) => void;
+  onSubmit: (data: ItemFormData, id?: string) => Promise<void>;
   open: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
@@ -675,17 +677,27 @@ function ItemFormDialog({
           categoryId: editingItem.categoryId,
           imageUrl: editingItem.imageUrl || "",
           videoUrl: editingItem.videoUrl || "",
+          imageFile: null,
+          videoFile: null,
           isAvailable: editingItem.isAvailable,
         }
       : { ...EMPTY_FORM, categoryId: categories[0]?.id || "" }
   );
   const [saving, setSaving] = useState(false);
 
-  function handleSubmit(e: React.FormEvent) {
+  async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     if (!form.nameFr.trim() || !form.price || !form.categoryId) return;
-    setSaving(true);
-    onSubmit(form, editingItem?.id);
+
+    try {
+      setSaving(true);
+      await onSubmit(form, editingItem?.id);
+    } catch (error) {
+      console.error("Erreur lors de l'ajout du plat :", error);
+      toast.error("Une erreur est survenue lors de la creation du plat.");
+    } finally {
+      setSaving(false);
+    }
   }
 
   const handleClose = (isOpen: boolean) => {
@@ -797,8 +809,11 @@ function ItemFormDialog({
             label="Image du plat"
             accept="image/jpeg,image/webp"
             maxSizeMb={5}
-            value={form.imageUrl}
-            onChange={(url) => setForm({ ...form, imageUrl: url })}
+            value={form.imageFile?.name || form.imageUrl}
+            onChange={(file) =>
+              setForm({ ...form, imageFile: file, imageUrl: file ? form.imageUrl : "" })
+            }
+            disabled={saving}
             icon={ImageIcon}
           />
 
@@ -807,8 +822,11 @@ function ItemFormDialog({
             label="Vidéo courte (optionnel)"
             accept="video/mp4"
             maxSizeMb={10}
-            value={form.videoUrl}
-            onChange={(url) => setForm({ ...form, videoUrl: url })}
+            value={form.videoFile?.name || form.videoUrl}
+            onChange={(file) =>
+              setForm({ ...form, videoFile: file, videoUrl: file ? form.videoUrl : "" })
+            }
+            disabled={saving}
             icon={Video}
           />
 
@@ -977,6 +995,18 @@ export default function DashboardPage() {
 
   const handleFormSubmit = useCallback(
     async (formData: ItemFormData, itemId?: string) => {
+      if (!data?.restaurantId) {
+        throw new Error("Restaurant introuvable");
+      }
+
+      const now = new Date().toISOString();
+      const nextImageUrl = formData.imageFile
+        ? await uploadDishFile(formData.imageFile, data.restaurantId, "images")
+        : formData.imageUrl || null;
+      const nextVideoUrl = formData.videoFile
+        ? await uploadDishFile(formData.videoFile, data.restaurantId, "videos")
+        : formData.videoUrl || null;
+
       const payload = {
         nameFr: formData.nameFr,
         nameEn: formData.nameEn || null,
@@ -984,38 +1014,37 @@ export default function DashboardPage() {
         descriptionEn: formData.descriptionEn || null,
         price: parseFloat(formData.price),
         categoryId: formData.categoryId,
-        imageUrl: formData.imageUrl || null,
-        videoUrl: formData.videoUrl || null,
+        imageUrl: nextImageUrl,
+        videoUrl: nextVideoUrl,
         isAvailable: formData.isAvailable,
       };
 
       try {
         if (itemId) {
-          const res = await fetch(`/api/dashboard/items/${itemId}`, {
-            method: "PUT",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+          await updateDoc(doc(firestoreDb, "items", itemId), {
+            ...payload,
+            updatedAt: now,
           });
-          if (!res.ok) throw new Error();
           toast.success(`\"${payload.nameFr}\" mis à jour`);
         } else {
-          const res = await fetch("/api/dashboard/items", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify(payload),
+          await addDoc(collection(firestoreDb, "items"), {
+            ...payload,
+            restaurantId: data.restaurantId,
+            createdAt: now,
+            updatedAt: now,
           });
-          if (!res.ok) throw new Error();
           toast.success(`\"${payload.nameFr}\" ajouté au menu`);
         }
 
         setDialogOpen(false);
         setEditingItem(null);
-        fetchMenu();
-      } catch {
+        await fetchMenu();
+      } catch (error) {
+        console.error("Erreur lors de l'ajout du plat :", error);
         toast.error(itemId ? "Erreur de mise à jour" : "Erreur d\u2019ajout");
       }
     },
-    [fetchMenu]
+    [data?.restaurantId, fetchMenu]
   );
 
   // ─── Loading / Protection ─────────────────────────────────────────────
