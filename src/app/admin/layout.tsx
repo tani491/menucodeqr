@@ -1,37 +1,61 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { toast } from "@/hooks/use-toast";
+import {
+  readWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+  type TabWorkspaceSession,
+} from "@/lib/tab-session";
 
 export default function AdminLayout({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const redirectedRef = useRef(false);
-  const role = session?.user?.role;
-  const isAdmin = role === "super_admin" || role === "admin";
+  const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
+  const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const currentAdminSession = useMemo(
+    () => workspaceSessionFromUser("admin", session?.user),
+    [
+      session?.user?.id,
+      session?.user?.role,
+      session?.user?.email,
+      session?.user?.name,
+      session?.user?.restaurantId,
+    ]
+  );
+  const adminSession = currentAdminSession || tabSession;
 
   useEffect(() => {
-    if (status === "loading") return;
-
-    if (status === "unauthenticated") {
-      router.replace("/login");
+    if (currentAdminSession) {
+      rememberWorkspaceSession("admin", currentAdminSession);
+      setTabSession(currentAdminSession);
+      setWorkspaceSessionChecked(true);
       return;
     }
 
-    if (status === "authenticated" && !isAdmin && !redirectedRef.current) {
-      redirectedRef.current = true;
-      toast({
-        title: "Acces admin refuse",
-        description: "Votre session restaurateur a ete redirigee vers le dashboard.",
-        variant: "destructive",
-      });
+    if (status !== "loading") {
+      setTabSession(readWorkspaceSession("admin"));
+      setWorkspaceSessionChecked(true);
+    }
+  }, [currentAdminSession, status]);
+
+  useEffect(() => {
+    if (status === "loading" || !workspaceSessionChecked) return;
+
+    if (status === "unauthenticated") {
+      router.replace("/login");
+    } else if (!adminSession && status === "authenticated") {
       router.replace("/dashboard");
     }
-  }, [isAdmin, router, status]);
+  }, [status, adminSession, workspaceSessionChecked, router]);
 
-  if (status === "authenticated" && !isAdmin) return null;
+  if ((status === "loading" || !workspaceSessionChecked) && !adminSession) {
+    return null;
+  }
+
+  if (!adminSession || status === "unauthenticated") return null;
 
   return <>{children}</>;
 }

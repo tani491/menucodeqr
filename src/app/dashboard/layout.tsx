@@ -1,49 +1,61 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
-import { toast } from "@/hooks/use-toast";
+import {
+  readWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+  type TabWorkspaceSession,
+} from "@/lib/tab-session";
 
 export default function DashboardLayout({ children }: { children: ReactNode }) {
   const { data: session, status } = useSession();
   const router = useRouter();
-  const redirectedRef = useRef(false);
-  const role = session?.user?.role;
-  const isAdmin = role === "super_admin" || role === "admin";
-  const isRestaurateur = role === "restaurateur";
+  const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
+  const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const currentDashboardSession = useMemo(
+    () => workspaceSessionFromUser("dashboard", session?.user),
+    [
+      session?.user?.id,
+      session?.user?.role,
+      session?.user?.email,
+      session?.user?.name,
+      session?.user?.restaurantId,
+    ]
+  );
+  const dashboardSession = currentDashboardSession || tabSession;
 
   useEffect(() => {
-    if (status === "loading") return;
+    if (currentDashboardSession) {
+      rememberWorkspaceSession("dashboard", currentDashboardSession);
+      setTabSession(currentDashboardSession);
+      setWorkspaceSessionChecked(true);
+      return;
+    }
+
+    if (status !== "loading") {
+      setTabSession(readWorkspaceSession("dashboard"));
+      setWorkspaceSessionChecked(true);
+    }
+  }, [currentDashboardSession, status]);
+
+  useEffect(() => {
+    if (status === "loading" || !workspaceSessionChecked) return;
 
     if (status === "unauthenticated") {
       router.replace("/login");
-      return;
-    }
-
-    if (status === "authenticated" && isAdmin && !redirectedRef.current) {
-      redirectedRef.current = true;
-      toast({
-        title: "Dashboard restaurateur refuse",
-        description: "Votre session admin a ete redirigee vers l'administration.",
-        variant: "destructive",
-      });
+    } else if (!dashboardSession && status === "authenticated") {
       router.replace("/admin");
-      return;
     }
+  }, [status, dashboardSession, workspaceSessionChecked, router]);
 
-    if (
-      status === "authenticated" &&
-      !isAdmin &&
-      !isRestaurateur &&
-      !redirectedRef.current
-    ) {
-      redirectedRef.current = true;
-      router.replace("/login");
-    }
-  }, [isAdmin, isRestaurateur, router, status]);
+  if ((status === "loading" || !workspaceSessionChecked) && !dashboardSession) {
+    return null;
+  }
 
-  if (status === "authenticated" && (isAdmin || !isRestaurateur)) return null;
+  if (!dashboardSession || status === "unauthenticated") return null;
 
   return <>{children}</>;
 }

@@ -1106,7 +1106,7 @@ export default function DashboardPage() {
   useEffect(() => {
     if (status === "loading" || !workspaceSessionChecked) return;
 
-    if (!dashboardSession && status === "unauthenticated") {
+    if (status === "unauthenticated") {
       router.push("/login");
     } else if (!dashboardSession && status === "authenticated") {
       router.push("/admin");
@@ -1358,7 +1358,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!dashboardSession) return null;
+  if (!dashboardSession || status === "unauthenticated") return null;
 
   if (setupPending) {
     return (

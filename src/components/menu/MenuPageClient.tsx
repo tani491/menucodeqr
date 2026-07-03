@@ -182,13 +182,17 @@ function RestaurantHeader({
 
       {/* Info du restaurant — overlay sur la bannière */}
       <div
-        className={`relative flex items-end gap-3 px-4 pb-3 -mt-10 z-10 ${
-          !restaurant.bannerUrl ? "pt-4 -mt-0" : ""
+        className={`relative flex items-start gap-4 px-4 pb-5 -mt-14 z-10 ${
+          !restaurant.bannerUrl ? "mt-0 pt-5" : ""
         }`}
       >
         {/* Logo */}
         {restaurant.logoUrl && (
-          <div className="flex-shrink-0 w-16 h-16 sm:w-20 sm:h-20 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white">
+          <div
+            className={`flex-shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white ${
+              restaurant.bannerUrl ? "mt-7" : "mt-1"
+            }`}
+          >
             <img
               src={restaurant.logoUrl}
               alt={`Logo de ${restaurant.name}`}
@@ -196,7 +200,7 @@ function RestaurantHeader({
             />
           </div>
         )}
-        <div className="flex-1 min-w-0 pb-1">
+        <div className={`flex-1 min-w-0 pb-2 pl-1 ${restaurant.logoUrl ? "pt-4 sm:pt-5" : "pt-1"}`}>
           <h1 className="text-xl sm:text-2xl font-bold text-black drop-shadow-md truncate">
             <span style={!restaurant.bannerUrl ? { color: brandColor } : undefined}>
               {restaurant.name}
@@ -692,20 +696,28 @@ function CheckoutDialog({
   brandColor: string;
   submitting: boolean;
   onClose: () => void;
-  onSubmit: (form: { customerName: string; customerPhone: string; notes: string }) => void;
+  onSubmit: (form: {
+    customerName: string;
+    customerPhone: string;
+    notes: string;
+    tableNumber: string;
+  }) => void;
 }) {
+  const [tableInput, setTableInput] = useState(tableNumber);
   const [customerName, setCustomerName] = useState("");
   const [customerPhone, setCustomerPhone] = useState("");
   const [notes, setNotes] = useState("");
   const total = cart.reduce((sum, item) => sum + item.price * item.quantity, 0);
 
   useEffect(() => {
+    setTableInput(tableNumber);
+
     if (!open) {
       setCustomerName("");
       setCustomerPhone("");
       setNotes("");
     }
-  }, [open]);
+  }, [open, tableNumber]);
 
   if (!open) return null;
 
@@ -719,7 +731,12 @@ function CheckoutDialog({
               Total: {total.toLocaleString("fr-FR")} FCFA
             </p>
           </div>
-          <button type="button" onClick={onClose} className="text-2xl leading-none text-black">
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-2xl leading-none text-black"
+            aria-label="Fermer"
+          >
             x
           </button>
         </div>
@@ -727,7 +744,7 @@ function CheckoutDialog({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
-            onSubmit({ customerName, customerPhone, notes });
+            onSubmit({ customerName, customerPhone, notes, tableNumber: tableInput.trim() });
           }}
         >
           <div className="space-y-2">
@@ -736,9 +753,14 @@ function CheckoutDialog({
             </label>
             <input
               id="checkout-table"
-              value={tableNumber}
-              disabled
-              className="h-10 w-full rounded-md border bg-muted px-3 text-sm text-black"
+              type="text"
+              inputMode="numeric"
+              value={tableInput}
+              onChange={(event) => setTableInput(event.target.value)}
+              placeholder="Ex: 3"
+              required
+              maxLength={20}
+              className="h-10 w-full rounded-md border px-3 text-sm text-black"
             />
           </div>
           <div className="space-y-2">
@@ -780,14 +802,14 @@ function CheckoutDialog({
               className="min-h-20 w-full rounded-md border px-3 py-2 text-sm text-black"
             />
           </div>
-          {!tableNumber && (
+          {!tableInput.trim() && (
             <p className="rounded-md bg-red-50 p-3 text-sm text-red-700">
-              Le numero de table est absent de l'URL. Scannez un QR code de table valide.
+              Indiquez le numero de votre table avant d'envoyer la commande.
             </p>
           )}
           <button
             type="submit"
-            disabled={submitting || !tableNumber || cart.length === 0}
+            disabled={submitting || !tableInput.trim() || cart.length === 0}
             className="h-11 w-full rounded-full text-sm font-semibold text-white disabled:opacity-60"
             style={{ backgroundColor: brandColor }}
           >
@@ -826,7 +848,7 @@ function OrderStatusPanel({
       <div className="mb-3 flex items-start justify-between gap-3">
         <div>
           <p className="text-sm font-semibold text-black">Commande #{order.id.slice(0, 8)}</p>
-          <p className="text-xs text-muted-foreground">Table {order.tableNumber}</p>
+          <p className="text-xs text-muted-foreground">Table N° {order.tableNumber}</p>
           <p className="mt-1 text-sm font-medium text-black">{statusMessage}</p>
         </div>
         <p className="text-sm font-bold text-black">{order.totalPrice.toLocaleString("fr-FR")} FCFA</p>
@@ -945,8 +967,14 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     });
   }, [lang]);
 
-  async function handleSubmitOrder(form: { customerName: string; customerPhone: string; notes: string }) {
-    if (cart.length === 0 || !tableNumber) return;
+  async function handleSubmitOrder(form: {
+    customerName: string;
+    customerPhone: string;
+    notes: string;
+    tableNumber: string;
+  }) {
+    const submittedTableNumber = form.tableNumber.trim();
+    if (cart.length === 0 || !submittedTableNumber) return;
     setSubmittingOrder(true);
     try {
       const now = new Date().toISOString();
@@ -967,7 +995,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
       );
       const orderPayload = {
         restaurantId: restaurant.id,
-        tableNumber,
+        tableNumber: submittedTableNumber,
         items: orderItems,
         status: "pending",
         totalPrice,

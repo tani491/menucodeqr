@@ -14,6 +14,7 @@ import {
 } from "@/lib/tab-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { toast } from "sonner";
 import {
   collection,
   doc,
@@ -26,12 +27,14 @@ import {
 } from "firebase/firestore";
 import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw } from "lucide-react";
 
+type OrderStatus = "pending" | "ready" | "delivered";
+
 type DashboardOrder = {
   id: string;
   tableNumber: string;
   customerName: string;
   customerPhone: string;
-  status: string;
+  status: OrderStatus;
   totalPrice: number;
   notes: string | null;
   createdAt: string;
@@ -48,10 +51,20 @@ type RestaurantRef = {
   isSuspended: boolean;
 };
 
-const STATUS_COLUMNS = [
+const ORDER_STATUS_NEXT: Partial<Record<OrderStatus, OrderStatus>> = {
+  pending: "ready",
+  ready: "delivered",
+};
+
+const STATUS_COLUMNS: {
+  id: OrderStatus;
+  label: string;
+  next: OrderStatus | null;
+  action: string;
+}[] = [
   { id: "pending", label: "En attente", next: "ready", action: "Valider la commande" },
   { id: "ready", label: "Pretes", next: "delivered", action: "Servi / Termine" },
-  { id: "delivered", label: "Livrees", next: "", action: "" },
+  { id: "delivered", label: "Livrees", next: null, action: "" },
 ];
 
 function stringValue(value: unknown, fallback = "") {
@@ -82,7 +95,7 @@ function dateStringValue(value: unknown) {
   return new Date().toISOString();
 }
 
-function normalizeOrderStatus(status: unknown) {
+function normalizeOrderStatus(status: unknown): OrderStatus {
   if (status === "ready" || status === "delivered") return status;
   return "pending";
 }
@@ -179,7 +192,7 @@ export default function DashboardOrdersPage() {
   useEffect(() => {
     if (status === "loading" || !workspaceSessionChecked) return;
 
-    if (!dashboardSession && status === "unauthenticated") {
+    if (status === "unauthenticated") {
       router.push("/login");
     } else if (!dashboardSession && status === "authenticated") {
       router.push("/admin");
@@ -310,13 +323,32 @@ export default function DashboardOrdersPage() {
     }, {});
   }, [orders]);
 
-  async function updateStatus(orderId: string, status: string) {
-    setUpdatingId(orderId);
+  async function updateStatus(order: DashboardOrder, nextStatus: OrderStatus) {
+    const expectedStatus = ORDER_STATUS_NEXT[order.status];
+
+    if (expectedStatus !== nextStatus) {
+      toast.error("Transition de commande invalide");
+      void refreshOrders();
+      return;
+    }
+
+    setUpdatingId(order.id);
+    setOrders((current) =>
+      current.map((item) => (item.id === order.id ? { ...item, status: nextStatus } : item))
+    );
+
     try {
-      await updateDoc(doc(firestoreDb, "orders", orderId), {
-        status,
-        updatedAt: new Date().toISOString(),
+      const now = new Date().toISOString();
+      await updateDoc(doc(firestoreDb, "orders", order.id), {
+        status: nextStatus,
+        statusUpdatedAt: now,
+        updatedAt: now,
       });
+      toast.success(nextStatus === "ready" ? "Commande marquee prete" : "Commande livree");
+    } catch (error) {
+      console.error("Erreur mise a jour statut commande:", error);
+      toast.error("Impossible de mettre a jour la commande");
+      void refreshOrders();
     } finally {
       setUpdatingId(null);
     }
@@ -335,7 +367,7 @@ export default function DashboardOrdersPage() {
     );
   }
 
-  if (!dashboardSession) return null;
+  if (!dashboardSession || status === "unauthenticated") return null;
 
   if (currentRestaurant?.isSuspended) {
     return (
@@ -422,7 +454,9 @@ export default function DashboardOrdersPage() {
                   <article key={order.id} className="rounded-lg border bg-white p-3 shadow-sm">
                     <div className="mb-3 flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-2xl font-bold text-black">Table {order.tableNumber}</p>
+                        <p className="text-3xl font-black tracking-tight text-black">
+                          Table N° {order.tableNumber}
+                        </p>
                         <p className="text-xs text-muted-foreground">
                           {new Date(order.createdAt).toLocaleTimeString("fr-FR", {
                             hour: "2-digit",
@@ -456,7 +490,7 @@ export default function DashboardOrdersPage() {
                         className="w-full"
                         size="sm"
                         disabled={updatingId === order.id}
-                        onClick={() => updateStatus(order.id, column.next)}
+                        onClick={() => column.next && updateStatus(order, column.next)}
                       >
                         {updatingId === order.id ? "Mise a jour..." : column.action}
                       </Button>

@@ -1,49 +1,94 @@
-import { Suspense } from "react";
-import { getMenuBySlug } from "@/lib/menu-data";
-import MenuPageClient, { MenuSkeleton } from "@/components/menu/MenuPageClient";
+import Link from "next/link";
 import type { Metadata } from "next";
+import { ArrowRight, QrCode, ShieldCheck, UtensilsCrossed } from "lucide-react";
 
-// ─── ISR : revalidation toutes les 60 secondes ─────────────────────────────
-// En production, Next.js régénère la page en arrière-plan sans bloquer les
-// requêtes clientes — équivalent exact du ISR (Incremental Static Regeneration).
-// La DB n'est interrogée qu'une fois toutes les 60s max par restaurant.
-export const revalidate = 60;
-
-const DEMO_SLUG = "le-petit-bistrot";
-
-// ─── Metadata SEO ───────────────────────────────────────────────────────────
 export const metadata: Metadata = {
-  title: "Le Petit Bistrot — Menu Digital",
+  title: "MenuCodeQR - Menus digitaux pour restaurants",
   description:
-    "Consultez le menu complet du Petit Bistrot. Scannez le QR code pour accéder aux plats, entrées, desserts et boissons.",
-  openGraph: {
-    title: "Le Petit Bistrot — Menu Digital",
-    description: "Menu digital interactif avec photos et prix.",
-    type: "website",
-  },
+    "Bienvenue sur MenuCodeQR. Creez, personnalisez et gerez votre menu digital en toute simplicite.",
 };
 
-// ─── Page serveur ───────────────────────────────────────────────────────────
-// Cette fonction s'exécute CÔTÉ SERVEUR uniquement. Les données sont
-// injectées en HTML statique — pas d'appel réseau côté client au chargement.
-export default async function MenuPage() {
-  const data = await getMenuBySlug(DEMO_SLUG);
-
-  if (!data) {
-    return (
-      <div className="min-h-screen flex flex-col items-center justify-center p-6 text-center">
-        <span className="text-5xl mb-4">🔍</span>
-        <h1 className="text-xl font-bold mb-2">Restaurant introuvable</h1>
-        <p className="text-sm text-muted-foreground">
-          Ce menu n&apos;existe pas ou a été supprimé.
-        </p>
-      </div>
-    );
-  }
-
+export default function HomePage() {
   return (
-    <Suspense fallback={<MenuSkeleton />}>
-      <MenuPageClient data={data} />
-    </Suspense>
+    <main className="min-h-screen bg-background text-foreground">
+      <section className="mx-auto flex min-h-screen max-w-6xl flex-col px-5 py-6">
+        <header className="flex items-center justify-between border-b pb-4">
+          <div className="flex items-center gap-2">
+            <span className="flex h-9 w-9 items-center justify-center rounded-md bg-black text-white">
+              <QrCode className="h-5 w-5" />
+            </span>
+            <span className="text-sm font-bold tracking-wide">MenuCodeQR</span>
+          </div>
+          <Link
+            href="/login"
+            className="inline-flex h-9 items-center rounded-md border px-3 text-sm font-medium hover:bg-muted"
+          >
+            Connexion
+          </Link>
+        </header>
+
+        <div className="grid flex-1 items-center gap-10 py-12 lg:grid-cols-[1.05fr_0.95fr]">
+          <div className="max-w-2xl">
+            <p className="mb-3 text-sm font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              Menu digital restaurant
+            </p>
+            <h1 className="text-4xl font-black leading-tight text-black sm:text-5xl">
+              Bienvenue sur MenuCodeQR.
+            </h1>
+            <p className="mt-5 max-w-xl text-base leading-7 text-muted-foreground sm:text-lg">
+              Creez et gerez votre menu digital en toute simplicite, depuis les plats
+              jusqu'aux commandes en salle.
+            </p>
+            <div className="mt-7 flex flex-col gap-3 sm:flex-row">
+              <Link
+                href="/login"
+                className="inline-flex h-11 items-center justify-center rounded-md bg-black px-5 text-sm font-semibold text-white hover:bg-black/90"
+              >
+                Acceder a mon espace
+                <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
+            </div>
+          </div>
+
+          <div className="rounded-lg border bg-white p-5 shadow-sm">
+            <div className="mb-5 flex items-center justify-between">
+              <div>
+                <p className="text-sm font-bold text-black">Apercu operationnel</p>
+                <p className="text-xs text-muted-foreground">Menu, tables et commandes</p>
+              </div>
+              <span className="rounded-md bg-emerald-50 px-2.5 py-1 text-xs font-semibold text-emerald-700">
+                Actif
+              </span>
+            </div>
+            <div className="grid grid-cols-3 gap-2">
+              {Array.from({ length: 9 }).map((_, index) => (
+                <div
+                  key={index}
+                  className={`aspect-square rounded-sm ${
+                    [0, 2, 4, 6, 8].includes(index) ? "bg-black" : "bg-muted"
+                  }`}
+                />
+              ))}
+            </div>
+            <div className="mt-5 grid gap-4 border-t pt-4 sm:grid-cols-2">
+              <div>
+                <UtensilsCrossed className="mb-2 h-4 w-4 text-black" />
+                <p className="text-sm font-semibold text-black">Menus personnalises</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Plats, couleurs, logo et banniere.
+                </p>
+              </div>
+              <div>
+                <ShieldCheck className="mb-2 h-4 w-4 text-black" />
+                <p className="text-sm font-semibold text-black">Espaces securises</p>
+                <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                  Admin et restaurateur separes.
+                </p>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
   );
 }

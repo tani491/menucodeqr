@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
 import { upsertFirebaseRestaurateur } from "@/lib/firebaseUsers";
 import bcrypt from "bcryptjs";
 
@@ -63,19 +64,47 @@ export async function POST(
     },
   });
 
+  let firebaseUid: string | null = null;
+
   try {
-    await upsertFirebaseRestaurateur({
+    const firebaseResult = await upsertFirebaseRestaurateur({
       name: user.name,
       email: user.email,
       password,
       restaurantId,
     });
+    if (!firebaseResult.synced || !firebaseResult.uid) {
+      throw new Error("Firebase Admin Auth n'est pas configure");
+    }
+    firebaseUid = firebaseResult.uid;
   } catch (error) {
     await db.user.delete({ where: { id: user.id } });
     const message = error instanceof Error ? error.message : "Erreur Firebase Auth";
     return NextResponse.json(
       { error: `Compte non cree: provisionnement Firebase impossible (${message})` },
       { status: 502 }
+    );
+  }
+
+  const firestore = getFirebaseAdminFirestore();
+  if (firestore && firebaseUid) {
+    const now = new Date().toISOString();
+    await firestore.collection("users").doc(firebaseUid).set(
+      {
+        id: firebaseUid,
+        uid: firebaseUid,
+        name: user.name,
+        email: user.email,
+        role: "restaurateur",
+        restaurantId,
+        status: "active",
+        authProvider: "firebase",
+        mustChangePassword: true,
+        initialPasswordCreatedAt: now,
+        passwordUpdatedAt: null,
+        updatedAt: now,
+      },
+      { merge: true }
     );
   }
 

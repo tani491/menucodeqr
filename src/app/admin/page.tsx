@@ -202,9 +202,12 @@ function CreateRestaurantDialog({
         role: "restaurateur",
         restaurantId,
         status: "active",
+        authProvider: "firebase",
         createdAt,
         updatedAt: createdAt,
         mustChangePassword: true,
+        initialPasswordCreatedAt: createdAt,
+        passwordUpdatedAt: null,
       });
 
       await setDoc(restaurantRef, {
@@ -596,7 +599,7 @@ export default function AdminPage() {
   useEffect(() => {
     if (status === "loading" || !workspaceSessionChecked) return;
 
-    if (!adminSession && status === "unauthenticated") {
+    if (status === "unauthenticated") {
       router.push("/login");
     } else if (!adminSession && status === "authenticated") {
       router.push("/dashboard");
@@ -696,7 +699,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!adminSession) return null;
+  if (!adminSession || status === "unauthenticated") return null;
 
   const totalItems = restaurants.reduce((acc, r) => acc + r._count.items, 0);
   const totalUsers = restaurants.reduce((acc, r) => acc + r._count.users, 0);
