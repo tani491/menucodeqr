@@ -30,7 +30,7 @@ import { toast } from "sonner";
 import { db, firebaseConfig } from "@/lib/firebaseClient";
 import { deleteApp, initializeApp } from "firebase/app";
 import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
-import { addDoc, collection, doc, getDocs, setDoc } from "firebase/firestore";
+import { addDoc, collection, doc, getDocs, setDoc, updateDoc } from "firebase/firestore";
 import {
   Plus,
   LogOut,
@@ -587,7 +587,7 @@ export default function AdminPage() {
             name: typeof data.name === "string" ? data.name : "Restaurant",
             logoUrl: typeof data.logoUrl === "string" ? data.logoUrl : null,
             bannerUrl: typeof data.bannerUrl === "string" ? data.bannerUrl : null,
-            isSuspended: Boolean(data.isSuspended),
+            isSuspended: data.status === "suspended" || Boolean(data.isSuspended),
             createdAt: normalizeFirestoreDate(data.createdAt),
             _count: {
               categories: Number(countData.categories ?? data.categoriesCount ?? 0),
@@ -620,6 +620,7 @@ export default function AdminPage() {
 
   async function toggleRestaurantSuspension(restaurant: RestaurantRow, isActive: boolean) {
     const nextIsSuspended = !isActive;
+    const nextStatus = nextIsSuspended ? "suspended" : "active";
     setRestaurants((current) =>
       current.map((item) =>
         item.id === restaurant.id ? { ...item, isSuspended: nextIsSuspended } : item
@@ -627,16 +628,11 @@ export default function AdminPage() {
     );
 
     try {
-      const res = await fetch(`/api/admin/restaurants/${restaurant.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isSuspended: nextIsSuspended }),
+      await updateDoc(doc(db, "restaurants", restaurant.id), {
+        status: nextStatus,
+        isSuspended: nextIsSuspended,
+        updatedAt: new Date().toISOString(),
       });
-      const data = await res.json();
-
-      if (!res.ok) {
-        throw new Error(data.error || "Erreur de mise a jour");
-      }
 
       toast.success(nextIsSuspended ? "Restaurant suspendu" : "Restaurant reactive");
     } catch (error) {

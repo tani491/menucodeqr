@@ -12,7 +12,6 @@ import {
   doc,
   getDocs,
   onSnapshot,
-  orderBy,
   query,
   updateDoc,
   where,
@@ -31,13 +30,9 @@ type DashboardOrder = {
   createdAt: string;
   items: {
     id: string;
+    name: string;
+    price: number;
     quantity: number;
-    priceAtPurchase: number;
-    item: {
-      id: string;
-      nameFr: string;
-      nameEn: string;
-    };
   }[];
 };
 
@@ -47,10 +42,10 @@ type RestaurantRef = {
 };
 
 const STATUS_COLUMNS = [
-  { id: "pending", label: "En attente", next: "confirmed", action: "Confirmer" },
-  { id: "confirmed", label: "Confirmees", next: "preparing", action: "Preparer" },
-  { id: "preparing", label: "En preparation", next: "ready", action: "Prete !" },
-  { id: "ready", label: "Pretes", next: "", action: "" },
+  { id: "pending", label: "En attente", next: "preparing", action: "Accepter" },
+  { id: "preparing", label: "En preparation", next: "ready", action: "Pret" },
+  { id: "ready", label: "Pretes", next: "delivered", action: "Servi / Termine" },
+  { id: "delivered", label: "Livrees", next: "", action: "" },
 ];
 
 function stringValue(value: unknown, fallback = "") {
@@ -81,6 +76,12 @@ function dateStringValue(value: unknown) {
   return new Date().toISOString();
 }
 
+function normalizeOrderStatus(status: unknown) {
+  if (status === "preparing" || status === "ready" || status === "delivered") return status;
+  if (status === "confirmed") return "preparing";
+  return "pending";
+}
+
 function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
   const data = docSnap.data() as Record<string, unknown>;
   const rawItems = Array.isArray(data.items) ? data.items : [];
@@ -96,16 +97,13 @@ function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
         : {};
     const itemId = stringValue(rawItem.id, stringValue(line.itemId, `${docSnap.id}-${index}`));
     const name = stringValue(rawItem.nameFr, stringValue(line.name, "Plat"));
+    const price = numberValue(line.price, numberValue(line.priceAtPurchase));
 
     return {
-      id: stringValue(line.id, `${docSnap.id}-${index}`),
+      id: stringValue(line.id, itemId),
+      name,
+      price,
       quantity: numberValue(line.quantity, 1),
-      priceAtPurchase: numberValue(line.priceAtPurchase, numberValue(line.price)),
-      item: {
-        id: itemId,
-        nameFr: name,
-        nameEn: stringValue(rawItem.nameEn, name),
-      },
     };
   });
 
@@ -114,7 +112,7 @@ function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
     tableNumber: stringValue(data.tableNumber, "1"),
     customerName: stringValue(data.customerName, "Client"),
     customerPhone: stringValue(data.customerPhone),
-    status: stringValue(data.status, "pending"),
+    status: normalizeOrderStatus(data.status),
     totalPrice: numberValue(data.totalPrice),
     notes: typeof data.notes === "string" && data.notes.trim() ? data.notes : null,
     createdAt: dateStringValue(data.createdAt),
@@ -125,8 +123,13 @@ function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
 function ordersQuery(restaurantId: string) {
   return query(
     collection(firestoreDb, "orders"),
-    where("restaurantId", "==", restaurantId),
-    orderBy("createdAt", "desc")
+    where("restaurantId", "==", restaurantId)
+  );
+}
+
+function sortOrdersByDate(orders: DashboardOrder[]) {
+  return [...orders].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 }
 
@@ -139,6 +142,7 @@ export default function DashboardOrdersPage() {
   const [restaurantResolved, setRestaurantResolved] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
+  const [newOrderNotice, setNewOrderNotice] = useState(false);
 
   useEffect(() => {
     if (status === "unauthenticated") router.push("/login");
@@ -178,9 +182,10 @@ export default function DashboardOrdersPage() {
         }
 
         const restaurant = restaurantDoc.data() as Record<string, unknown>;
+        const restaurantStatus = stringValue(restaurant.status, "active");
         setCurrentRestaurant({
           id: stringValue(restaurant.id, restaurantDoc.id),
-          isSuspended: Boolean(restaurant.isSuspended),
+          isSuspended: restaurantStatus === "suspended" || Boolean(restaurant.isSuspended),
         });
         setRestaurantResolved(true);
       } catch (error) {
@@ -212,7 +217,7 @@ export default function DashboardOrdersPage() {
       const unsubscribe = onSnapshot(
         ordersQuery(currentRestaurant.id),
         (snapshot) => {
-          setOrders(snapshot.docs.map(normalizeOrder));
+          setOrders(sortOrdersByDate(snapshot.docs.map(normalizeOrder)));
           setLoading(false);
         },
         (error) => {
@@ -235,7 +240,7 @@ export default function DashboardOrdersPage() {
     try {
       setLoading(true);
       const snapshot = await getDocs(ordersQuery(currentRestaurant.id));
-      setOrders(snapshot.docs.map(normalizeOrder));
+      setOrders(sortOrdersByDate(snapshot.docs.map(normalizeOrder)));
     } catch (error) {
       console.error("Erreur actualisation commandes:", error);
     } finally {
@@ -246,7 +251,10 @@ export default function DashboardOrdersPage() {
   useEffect(() => {
     if (orders.length === 0) return;
     const newest = orders[0]?.id;
-    if (lastSeenOrderId && newest && newest !== lastSeenOrderId) {
+    const newestOrder = orders[0];
+    if (lastSeenOrderId && newest && newest !== lastSeenOrderId && newestOrder?.status === "pending") {
+      setNewOrderNotice(true);
+      window.setTimeout(() => setNewOrderNotice(false), 6000);
       try {
         const audio = new Audio("/notification.mp3");
         audio.volume = 0.4;
@@ -347,9 +355,17 @@ export default function DashboardOrdersPage() {
       </header>
 
       <main className="mx-auto max-w-7xl px-3 py-4 sm:px-4">
-        <div className="mb-4 flex items-center gap-2 rounded-lg border bg-card p-3 text-sm text-muted-foreground">
+        <div
+          className={`mb-4 flex items-center gap-2 rounded-lg border p-3 text-sm ${
+            newOrderNotice
+              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+              : "bg-card text-muted-foreground"
+          }`}
+        >
           <Bell className="h-4 w-4" />
-          Les nouvelles commandes sont actualisees automatiquement.
+          {newOrderNotice
+            ? "Nouvelle commande recue !"
+            : "Les nouvelles commandes sont actualisees automatiquement."}
         </div>
 
         <div className="grid gap-3 lg:grid-cols-4">
@@ -385,10 +401,10 @@ export default function DashboardOrdersPage() {
                       {order.items.map((line) => (
                         <li key={line.id} className="flex justify-between gap-3">
                           <span className="text-black">
-                            {line.quantity}x {line.item.nameFr}
+                            {line.quantity}x {line.name}
                           </span>
                           <span className="text-muted-foreground">
-                            {(line.quantity * line.priceAtPurchase).toLocaleString("fr-FR")} FCFA
+                            {(line.quantity * line.price).toLocaleString("fr-FR")} FCFA
                           </span>
                         </li>
                       ))}
@@ -403,10 +419,10 @@ export default function DashboardOrdersPage() {
                         {updatingId === order.id ? "Mise a jour..." : column.action}
                       </Button>
                     )}
-                    {column.id === "ready" && (
-                      <div className="flex items-center justify-center gap-1 rounded-md bg-emerald-50 p-2 text-xs font-medium text-emerald-700">
+                    {column.id === "delivered" && (
+                      <div className="flex items-center justify-center gap-1 rounded-md bg-slate-50 p-2 text-xs font-medium text-slate-700">
                         <Clock className="h-3.5 w-3.5" />
-                        Pret a servir
+                        Commande terminee
                       </div>
                     )}
                   </article>

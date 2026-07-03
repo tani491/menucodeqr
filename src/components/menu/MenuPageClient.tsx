@@ -20,13 +20,9 @@ type CartItem = {
 
 type PublicOrderItem = {
   id: string;
+  name: string;
+  price: number;
   quantity: number;
-  priceAtPurchase: number;
-  item: {
-    id: string;
-    nameFr: string;
-    nameEn: string;
-  };
 };
 
 type PublicOrder = {
@@ -40,6 +36,12 @@ type PublicOrder = {
   createdAt: string;
   items: PublicOrderItem[];
 };
+
+function normalizeOrderStatus(status: unknown) {
+  if (status === "preparing" || status === "ready" || status === "delivered") return status;
+  if (status === "confirmed") return "preparing";
+  return "pending";
+}
 
 // ─── UI Labels par langue ──────────────────────────────────────────────────
 
@@ -60,16 +62,13 @@ function normalizePublicOrder(id: string, data: Record<string, unknown>): Public
         : typeof line.name === "string"
           ? line.name
           : "Plat";
+    const price = Number(line.price ?? line.priceAtPurchase ?? 0);
 
     return {
       id: typeof line.id === "string" ? line.id : `${id}-${index}`,
+      name: itemName,
+      price,
       quantity: Number(line.quantity || 1),
-      priceAtPurchase: Number(line.priceAtPurchase || line.price || 0),
-      item: {
-        id: typeof rawItem.id === "string" ? rawItem.id : typeof line.itemId === "string" ? line.itemId : "",
-        nameFr: itemName,
-        nameEn: typeof rawItem.nameEn === "string" && rawItem.nameEn.trim() ? rawItem.nameEn : itemName,
-      },
     };
   });
 
@@ -78,7 +77,7 @@ function normalizePublicOrder(id: string, data: Record<string, unknown>): Public
     tableNumber: typeof data.tableNumber === "string" ? data.tableNumber : "1",
     customerName: typeof data.customerName === "string" ? data.customerName : "Client",
     customerPhone: typeof data.customerPhone === "string" ? data.customerPhone : "",
-    status: typeof data.status === "string" ? data.status : "pending",
+    status: normalizeOrderStatus(data.status),
     totalPrice: Number(data.totalPrice || 0),
     notes: typeof data.notes === "string" && data.notes.trim() ? data.notes : null,
     createdAt: typeof data.createdAt === "string" ? data.createdAt : new Date().toISOString(),
@@ -811,11 +810,19 @@ function OrderStatusPanel({
 
   const steps = [
     { id: "pending", label: "En attente" },
-    { id: "confirmed", label: "Confirmee" },
     { id: "preparing", label: "En preparation" },
     { id: "ready", label: "Prete" },
+    { id: "delivered", label: "Livree" },
   ];
   const activeIndex = Math.max(0, steps.findIndex((step) => step.id === order.status));
+  const statusMessage =
+    order.status === "preparing"
+      ? "Votre commande est en preparation."
+      : order.status === "ready"
+        ? "Votre commande est prete !"
+        : order.status === "delivered"
+          ? "Votre commande a ete servie. Bon appetit !"
+          : "Votre commande a ete envoyee au restaurant.";
 
   return (
     <section className="mx-auto mb-24 mt-3 max-w-2xl rounded-xl border bg-white p-4 shadow-sm">
@@ -823,6 +830,7 @@ function OrderStatusPanel({
         <div>
           <p className="text-sm font-semibold text-black">Commande #{order.id.slice(0, 8)}</p>
           <p className="text-xs text-muted-foreground">Table {order.tableNumber}</p>
+          <p className="mt-1 text-sm font-medium text-black">{statusMessage}</p>
         </div>
         <p className="text-sm font-bold text-black">{order.totalPrice.toLocaleString("fr-FR")} FCFA</p>
       </div>
@@ -850,6 +858,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   const searchParams = useSearchParams();
   const tableNumber = searchParams.get("table")?.trim() || "";
   const cartStorageKey = `qr-cart:${restaurant.slug}:${tableNumber || "no-table"}`;
+  const orderStorageKey = `qr-order:${restaurant.slug}:${tableNumber || "no-table"}`;
 
   // ─── Langue (état local, par défaut FR) ─────────────────────────────────
   const [lang, setLang] = useState<Lang>("fr");
@@ -859,6 +868,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [activeOrder, setActiveOrder] = useState<PublicOrder | null>(null);
+  const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
 
   // État de la catégorie active — null = « Tout »
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -907,6 +917,14 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     window.localStorage.setItem(cartStorageKey, JSON.stringify(cart));
   }, [cart, cartStorageKey]);
 
+  useEffect(() => {
+    try {
+      setActiveOrderId(window.localStorage.getItem(orderStorageKey));
+    } catch {
+      setActiveOrderId(null);
+    }
+  }, [orderStorageKey]);
+
   const handleAddToCart = useCallback((item: MenuItem, quantity: number) => {
     const name = localItemName(item, lang);
     setCart((current) => {
@@ -937,41 +955,39 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
       const now = new Date().toISOString();
       const orderItems = cart.map((cartItem) => {
         const menuItem = allItems.find((item) => item.id === cartItem.itemId);
+        const itemName = menuItem ? localItemName(menuItem, lang) : cartItem.name;
 
         return {
           id: cartItem.itemId,
-          itemId: cartItem.itemId,
+          name: itemName,
+          price: cartItem.price,
           quantity: cartItem.quantity,
-          priceAtPurchase: cartItem.price,
-          item: {
-            id: cartItem.itemId,
-            nameFr: menuItem?.nameFr || cartItem.name,
-            nameEn: menuItem?.nameEn || cartItem.name,
-          },
         };
       });
       const totalPrice = orderItems.reduce(
-        (total, item) => total + item.priceAtPurchase * item.quantity,
+        (total, item) => total + item.price * item.quantity,
         0
       );
       const orderPayload = {
         restaurantId: restaurant.id,
-        restaurantSlug: restaurant.slug,
         tableNumber,
-        customerName: form.customerName,
-        customerPhone: form.customerPhone,
-        notes: form.notes || null,
+        items: orderItems,
         status: "pending",
         totalPrice,
-        items: orderItems,
         createdAt: now,
+        restaurantSlug: restaurant.slug,
+        customerName: form.customerName.trim(),
+        customerPhone: form.customerPhone.trim(),
+        notes: form.notes.trim() || null,
         updatedAt: now,
       };
       const orderRef = await addDoc(collection(firestoreDb, "orders"), orderPayload);
 
+      setActiveOrderId(orderRef.id);
       setActiveOrder(normalizePublicOrder(orderRef.id, orderPayload));
       setCart([]);
       window.localStorage.removeItem(cartStorageKey);
+      window.localStorage.setItem(orderStorageKey, orderRef.id);
       setCheckoutOpen(false);
     } catch (error) {
       console.error("Erreur creation commande Firestore:", error);
@@ -982,15 +998,15 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   }
 
   useEffect(() => {
-    if (!activeOrder?.id) return;
+    if (!activeOrderId) return;
 
-    const unsubscribe = onSnapshot(doc(firestoreDb, "orders", activeOrder.id), (snapshot) => {
+    const unsubscribe = onSnapshot(doc(firestoreDb, "orders", activeOrderId), (snapshot) => {
       if (!snapshot.exists()) return;
       setActiveOrder(normalizePublicOrder(snapshot.id, snapshot.data() as Record<string, unknown>));
     });
 
     return () => unsubscribe();
-  }, [activeOrder?.id]);
+  }, [activeOrderId]);
 
   // Intersection Observer pour le scroll infini
   useEffect(() => {

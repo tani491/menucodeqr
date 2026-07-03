@@ -47,7 +47,7 @@ export interface MenuData {
 // ─── In-memory cache pour les requêtes répétées (anti-crash) ────────────────
 
 const menuCache = new Map<string, { data: MenuData; timestamp: number }>();
-const CACHE_TTL_MS = 60_000; // 60 secondes de cache en mémoire
+const CACHE_TTL_MS = 0; // Le statut de suspension doit etre relu a chaque requete publique.
 
 let cachedFirestoreDb: Firestore | null | undefined;
 
@@ -134,6 +134,25 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
 
   const restaurantData = restaurantDoc.data() as FirestoreRecord;
   const restaurantId = stringValue(restaurantData.id, restaurantDoc.id);
+  const restaurantIsSuspended =
+    stringValue(restaurantData.status) === "suspended" ||
+    booleanValue(restaurantData.isSuspended);
+
+  if (restaurantIsSuspended) {
+    return {
+      restaurant: {
+        id: restaurantId,
+        slug: stringValue(restaurantData.slug, slug),
+        name: stringValue(restaurantData.name),
+        logoUrl: nullableStringValue(restaurantData.logoUrl),
+        bannerUrl: nullableStringValue(restaurantData.bannerUrl),
+        primaryColor: restaurantColorValue(restaurantData),
+        isSuspended: true,
+      },
+      categories: [],
+      items: [],
+    };
+  }
 
   const [categoriesSnapshot, dishesSnapshot, itemsSnapshot] = await Promise.all([
     getDocs(
@@ -203,7 +222,7 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
       logoUrl: nullableStringValue(restaurantData.logoUrl),
       bannerUrl: nullableStringValue(restaurantData.bannerUrl),
       primaryColor: restaurantColorValue(restaurantData),
-      isSuspended: booleanValue(restaurantData.isSuspended),
+      isSuspended: restaurantIsSuspended,
     },
     categories,
     items,

@@ -4,8 +4,9 @@ import MenuPageClient, { MenuSkeleton } from "@/components/menu/MenuPageClient";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
 
-// ─── ISR : revalidation toutes les 60 secondes ─────────────────────────────
-export const revalidate = 60;
+// Lecture dynamique pour appliquer immediatement une suspension restaurant.
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
 
 // ─── Génération statique des slugs connus (SSG) ────────────────────────────
 // Cette fonction est appelée au build pour
@@ -40,7 +41,7 @@ export default async function MenuBySlugPage({
         <div className="mx-auto max-w-md rounded-xl border bg-white p-6 text-center shadow-sm">
           <h1 className="text-xl font-bold text-black">Menu temporairement indisponible</h1>
           <p className="mt-3 text-sm leading-relaxed text-muted-foreground">
-            Ce menu est temporairement indisponible. Veuillez contacter l&apos;etablissement.
+            Ce restaurant est temporairement indisponible.
           </p>
         </div>
       </main>
