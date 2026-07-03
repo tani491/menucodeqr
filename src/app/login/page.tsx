@@ -5,6 +5,11 @@ import { getSession, signIn as signInWithNextAuth } from "next-auth/react";
 import { useSearchParams } from "next/navigation";
 import { signInWithEmailAndPassword } from "firebase/auth";
 import { auth } from "@/lib/firebaseClient";
+import {
+  clearWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+} from "@/lib/tab-session";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -47,10 +52,16 @@ function LoginForm() {
         const role = nextSession?.user?.role;
 
         if (role === "super_admin" || role === "admin") {
+          const adminSession = workspaceSessionFromUser("admin", nextSession?.user);
+          clearWorkspaceSession("dashboard");
+          if (adminSession) rememberWorkspaceSession("admin", adminSession);
           window.location.href = "/admin";
           return;
         }
 
+        const dashboardSession = workspaceSessionFromUser("dashboard", nextSession?.user);
+        clearWorkspaceSession("admin");
+        if (dashboardSession) rememberWorkspaceSession("dashboard", dashboardSession);
         window.location.href = "/dashboard";
         return;
       }

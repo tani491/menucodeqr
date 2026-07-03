@@ -5,6 +5,13 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { db as firestoreDb } from "@/lib/firebaseClient";
+import {
+  clearWorkspaceSession,
+  readWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+  type TabWorkspaceSession,
+} from "@/lib/tab-session";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -42,8 +49,7 @@ type RestaurantRef = {
 };
 
 const STATUS_COLUMNS = [
-  { id: "pending", label: "En attente", next: "preparing", action: "Accepter" },
-  { id: "preparing", label: "En preparation", next: "ready", action: "Pret" },
+  { id: "pending", label: "En attente", next: "ready", action: "Valider la commande" },
   { id: "ready", label: "Pretes", next: "delivered", action: "Servi / Termine" },
   { id: "delivered", label: "Livrees", next: "", action: "" },
 ];
@@ -77,8 +83,7 @@ function dateStringValue(value: unknown) {
 }
 
 function normalizeOrderStatus(status: unknown) {
-  if (status === "preparing" || status === "ready" || status === "delivered") return status;
-  if (status === "confirmed") return "preparing";
+  if (status === "ready" || status === "delivered") return status;
   return "pending";
 }
 
@@ -143,19 +148,51 @@ export default function DashboardOrdersPage() {
   const [updatingId, setUpdatingId] = useState<string | null>(null);
   const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
   const [newOrderNotice, setNewOrderNotice] = useState(false);
+  const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
+  const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const currentDashboardSession = useMemo(
+    () => workspaceSessionFromUser("dashboard", session?.user),
+    [
+      session?.user?.id,
+      session?.user?.role,
+      session?.user?.email,
+      session?.user?.name,
+      session?.user?.restaurantId,
+    ]
+  );
+  const dashboardSession = currentDashboardSession || tabSession;
 
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
-    if (status === "authenticated" && session?.user?.role !== "restaurateur") router.push("/admin");
-  }, [router, session, status]);
+    if (currentDashboardSession) {
+      rememberWorkspaceSession("dashboard", currentDashboardSession);
+      setTabSession(currentDashboardSession);
+      setWorkspaceSessionChecked(true);
+      return;
+    }
+
+    if (status !== "loading") {
+      setTabSession(readWorkspaceSession("dashboard"));
+      setWorkspaceSessionChecked(true);
+    }
+  }, [currentDashboardSession, status]);
 
   useEffect(() => {
-    if (status !== "authenticated" || session?.user?.role !== "restaurateur") return;
+    if (status === "loading" || !workspaceSessionChecked) return;
+
+    if (!dashboardSession && status === "unauthenticated") {
+      router.push("/login");
+    } else if (!dashboardSession && status === "authenticated") {
+      router.push("/admin");
+    }
+  }, [status, dashboardSession, workspaceSessionChecked, router]);
+
+  useEffect(() => {
+    if (!dashboardSession) return;
 
     let cancelled = false;
 
     async function loadRestaurant() {
-      const userId = session?.user?.id;
+      const userId = dashboardSession?.id;
       if (!userId) {
         setCurrentRestaurant(null);
         setOrders([]);
@@ -204,7 +241,7 @@ export default function DashboardOrdersPage() {
     return () => {
       cancelled = true;
     };
-  }, [session?.user?.id, session?.user?.role, status]);
+  }, [dashboardSession?.id]);
 
   useEffect(() => {
     if (!currentRestaurant?.id) {
@@ -285,7 +322,12 @@ export default function DashboardOrdersPage() {
     }
   }
 
-  if (status === "loading" || loading) {
+  const handleSignOut = useCallback(() => {
+    clearWorkspaceSession("dashboard");
+    void signOut({ callbackUrl: "/login" });
+  }, []);
+
+  if (((status === "loading" || !workspaceSessionChecked) && !dashboardSession) || loading) {
     return (
       <div className="flex min-h-screen items-center justify-center bg-background">
         <RefreshCw className="h-8 w-8 animate-spin text-primary" />
@@ -293,7 +335,7 @@ export default function DashboardOrdersPage() {
     );
   }
 
-  if (!session || session.user?.role !== "restaurateur") return null;
+  if (!dashboardSession) return null;
 
   if (currentRestaurant?.isSuspended) {
     return (
@@ -306,7 +348,7 @@ export default function DashboardOrdersPage() {
                 Dashboard
               </Link>
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
+            <Button variant="ghost" size="sm" onClick={handleSignOut}>
               <LogOut className="mr-1.5 h-4 w-4" />
               <span className="hidden sm:inline">Deconnexion</span>
             </Button>
@@ -346,7 +388,7 @@ export default function DashboardOrdersPage() {
               <RefreshCw className="mr-1.5 h-4 w-4" />
               Actualiser
             </Button>
-            <Button variant="ghost" size="sm" onClick={() => signOut({ callbackUrl: "/login" })}>
+            <Button variant="ghost" size="sm" onClick={handleSignOut}>
               <LogOut className="mr-1.5 h-4 w-4" />
               <span className="hidden sm:inline">Deconnexion</span>
             </Button>
@@ -368,7 +410,7 @@ export default function DashboardOrdersPage() {
             : "Les nouvelles commandes sont actualisees automatiquement."}
         </div>
 
-        <div className="grid gap-3 lg:grid-cols-4">
+        <div className="grid gap-3 lg:grid-cols-3">
           {STATUS_COLUMNS.map((column) => (
             <section key={column.id} className="min-h-40 rounded-lg border bg-card">
               <div className="flex items-center justify-between border-b p-3">

@@ -3,13 +3,11 @@ import { getToken } from "next-auth/jwt";
 import type { NextRequest } from "next/server";
 
 /**
- * Middleware de sécurité — vérifications côté SERVEUR avant le rendu.
+ * Server gate for protected app areas.
  *
- * Stratégie de séparation des rôles :
- *   /admin/*      → exige role = "super_admin" ou "admin" → sinon 302 vers /login
- *   /dashboard/*  → exige role = "restaurateur" → sinon 302 vers /login
- *   /api/admin/*  → les route handlers renvoient 401/403 eux-mêmes
- *   /api/dashboard/* → idem
+ * The browser only has one NextAuth cookie, so two tabs using different roles can
+ * overwrite that cookie. We only require a valid token here; each client page then
+ * verifies the expected role against its per-tab sessionStorage workspace.
  */
 export async function proxy(request: NextRequest) {
   const { pathname } = request.nextUrl;
@@ -18,36 +16,14 @@ export async function proxy(request: NextRequest) {
     secret: process.env.NEXTAUTH_SECRET || "dev-secret-change-in-production-menu-qr-v1",
   });
 
-  // ─── Routes pages protégées (rendu serveur) ──────────────────────────────
-  if (pathname.startsWith("/admin") && !pathname.startsWith("/api/")) {
-    if (!token) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    // Vérification stricte du rôle
-    if (token.role !== "super_admin" && token.role !== "admin") {
-      // Un restaurateur qui tente d'accéder à /admin est redirigé vers son dashboard
-      return NextResponse.redirect(new URL("/dashboard", request.url));
-    }
-  }
-
-  if (pathname.startsWith("/dashboard") && !pathname.startsWith("/api/")) {
-    if (!token) {
-      const loginUrl = new URL("/login", request.url);
-      loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
-      return NextResponse.redirect(loginUrl);
-    }
-
-    if (token.role === "super_admin" || token.role === "admin") {
-      // Un super_admin qui tente d'accéder à /dashboard est redirigé vers /admin
-      return NextResponse.redirect(new URL("/admin", request.url));
-    }
-
-    if (token.role !== "restaurateur") {
-      return NextResponse.redirect(new URL("/login", request.url));
-    }
+  if (
+    (pathname.startsWith("/admin") || pathname.startsWith("/dashboard")) &&
+    !pathname.startsWith("/api/") &&
+    !token
+  ) {
+    const loginUrl = new URL("/login", request.url);
+    loginUrl.searchParams.set("callbackUrl", pathname + request.nextUrl.search);
+    return NextResponse.redirect(loginUrl);
   }
 
   return NextResponse.next();

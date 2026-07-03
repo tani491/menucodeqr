@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,13 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { Switch } from "@/components/ui/switch";
 import PasswordSettingsDialog from "@/components/PasswordSettingsDialog";
+import {
+  clearWorkspaceSession,
+  readWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+  type TabWorkspaceSession,
+} from "@/lib/tab-session";
 import {
   Dialog,
   DialogContent,
@@ -556,17 +563,45 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [createRestoOpen, setCreateRestoOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const isAdminSession =
-    session?.user?.role === "super_admin" || session?.user?.role === "admin";
+  const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
+  const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const currentAdminSession = useMemo(
+    () => workspaceSessionFromUser("admin", session?.user),
+    [
+      session?.user?.id,
+      session?.user?.role,
+      session?.user?.email,
+      session?.user?.name,
+      session?.user?.restaurantId,
+    ]
+  );
+  const adminSession = currentAdminSession || tabSession;
+  const isAdminSession = !!adminSession;
 
   // Protection côté client (double sécurité avec le middleware serveur)
   useEffect(() => {
-    if (status === "unauthenticated") {
+    if (currentAdminSession) {
+      rememberWorkspaceSession("admin", currentAdminSession);
+      setTabSession(currentAdminSession);
+      setWorkspaceSessionChecked(true);
+      return;
+    }
+
+    if (status !== "loading") {
+      setTabSession(readWorkspaceSession("admin"));
+      setWorkspaceSessionChecked(true);
+    }
+  }, [currentAdminSession, status]);
+
+  useEffect(() => {
+    if (status === "loading" || !workspaceSessionChecked) return;
+
+    if (!adminSession && status === "unauthenticated") {
       router.push("/login");
-    } else if (status === "authenticated" && !isAdminSession) {
+    } else if (!adminSession && status === "authenticated") {
       router.push("/dashboard");
     }
-  }, [status, isAdminSession, router]);
+  }, [status, adminSession, workspaceSessionChecked, router]);
 
   const fetchRestaurants = useCallback(async () => {
     try {
@@ -611,10 +646,10 @@ export default function AdminPage() {
   }, []);
 
   useEffect(() => {
-    if (status === "authenticated" && isAdminSession) {
+    if (isAdminSession) {
       fetchRestaurants();
     }
-  }, [status, isAdminSession, fetchRestaurants]);
+  }, [isAdminSession, fetchRestaurants]);
 
   // ─── Loading ───────────────────────────────────────────────────────────
 
@@ -645,7 +680,12 @@ export default function AdminPage() {
     }
   }
 
-  if (status === "loading" || loading) {
+  const handleSignOut = useCallback(() => {
+    clearWorkspaceSession("admin");
+    void signOut({ callbackUrl: "/login" });
+  }, []);
+
+  if (((status === "loading" || !workspaceSessionChecked) && !adminSession) || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -656,7 +696,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!session || !isAdminSession) return null;
+  if (!adminSession) return null;
 
   const totalItems = restaurants.reduce((acc, r) => acc + r._count.items, 0);
   const totalUsers = restaurants.reduce((acc, r) => acc + r._count.users, 0);
@@ -672,7 +712,7 @@ export default function AdminPage() {
           </div>
           <div className="flex items-center gap-3">
             <span className="hidden sm:inline text-xs text-muted-foreground">
-              {session.user?.email}
+              {adminSession.email}
             </span>
             <Badge variant="outline" className="text-[10px]">
               SUPER_ADMIN
@@ -688,7 +728,7 @@ export default function AdminPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={handleSignOut}
             >
               <LogOut className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Déconnexion</span>

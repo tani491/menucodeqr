@@ -38,8 +38,7 @@ type PublicOrder = {
 };
 
 function normalizeOrderStatus(status: unknown) {
-  if (status === "preparing" || status === "ready" || status === "delivered") return status;
-  if (status === "confirmed") return "preparing";
+  if (status === "ready" || status === "delivered") return status;
   return "pending";
 }
 
@@ -317,6 +316,7 @@ function MenuItemCard({
             : "border-border bg-card hover:bg-accent/50"
         }
       `}
+      style={{ borderColor: brandColor }}
       aria-label={name}
     >
       {/* Photo ou vidéo du plat */}
@@ -810,15 +810,12 @@ function OrderStatusPanel({
 
   const steps = [
     { id: "pending", label: "En attente" },
-    { id: "preparing", label: "En preparation" },
     { id: "ready", label: "Prete" },
     { id: "delivered", label: "Livree" },
   ];
   const activeIndex = Math.max(0, steps.findIndex((step) => step.id === order.status));
   const statusMessage =
-    order.status === "preparing"
-      ? "Votre commande est en preparation."
-      : order.status === "ready"
+    order.status === "ready"
         ? "Votre commande est prete !"
         : order.status === "delivered"
           ? "Votre commande a ete servie. Bon appetit !"
@@ -834,7 +831,7 @@ function OrderStatusPanel({
         </div>
         <p className="text-sm font-bold text-black">{order.totalPrice.toLocaleString("fr-FR")} FCFA</p>
       </div>
-      <div className="grid grid-cols-4 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {steps.map((step, index) => {
           const isDone = index <= activeIndex;
           return (

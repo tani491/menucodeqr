@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -11,6 +11,13 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import PasswordSettingsDialog from "@/components/PasswordSettingsDialog";
+import {
+  clearWorkspaceSession,
+  readWorkspaceSession,
+  rememberWorkspaceSession,
+  workspaceSessionFromUser,
+  type TabWorkspaceSession,
+} from "@/lib/tab-session";
 import {
   Dialog,
   DialogContent,
@@ -1067,20 +1074,48 @@ export default function DashboardPage() {
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [setupPending, setSetupPending] = useState(false);
+  const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
+  const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const currentDashboardSession = useMemo(
+    () => workspaceSessionFromUser("dashboard", session?.user),
+    [
+      session?.user?.id,
+      session?.user?.role,
+      session?.user?.email,
+      session?.user?.name,
+      session?.user?.restaurantId,
+    ]
+  );
+  const dashboardSession = currentDashboardSession || tabSession;
 
   // ─── Protection côté client ────────────────────────────────────────────
   useEffect(() => {
-    if (status === "unauthenticated") router.push("/login");
-    else if (
-      status === "authenticated" &&
-      (session?.user?.role === "super_admin" || session?.user?.role === "admin")
-    )
+    if (currentDashboardSession) {
+      rememberWorkspaceSession("dashboard", currentDashboardSession);
+      setTabSession(currentDashboardSession);
+      setWorkspaceSessionChecked(true);
+      return;
+    }
+
+    if (status !== "loading") {
+      setTabSession(readWorkspaceSession("dashboard"));
+      setWorkspaceSessionChecked(true);
+    }
+  }, [currentDashboardSession, status]);
+
+  useEffect(() => {
+    if (status === "loading" || !workspaceSessionChecked) return;
+
+    if (!dashboardSession && status === "unauthenticated") {
+      router.push("/login");
+    } else if (!dashboardSession && status === "authenticated") {
       router.push("/admin");
-  }, [status, session, router]);
+    }
+  }, [status, dashboardSession, workspaceSessionChecked, router]);
 
   // ─── Chargement du menu ───────────────────────────────────────────────
   const fetchMenu = useCallback(async () => {
-    const userId = session?.user?.id;
+    const userId = dashboardSession?.id;
 
     if (!userId) {
       setData(null);
@@ -1120,13 +1155,13 @@ export default function DashboardPage() {
     } finally {
       setLoading(false);
     }
-  }, [session?.user?.id]);
+  }, [dashboardSession?.id]);
 
   useEffect(() => {
-    if (status === "authenticated" && session?.user?.role === "restaurateur") {
+    if (dashboardSession) {
       fetchMenu();
     }
-  }, [status, session?.user?.role, fetchMenu]);
+  }, [dashboardSession, fetchMenu]);
 
   // ─── Actions ──────────────────────────────────────────────────────────
   const openCreate = useCallback(() => {
@@ -1307,7 +1342,12 @@ export default function DashboardPage() {
 
   // ─── Loading / Protection ─────────────────────────────────────────────
 
-  if (status === "loading" || loading) {
+  const handleSignOut = useCallback(() => {
+    clearWorkspaceSession("dashboard");
+    void signOut({ callbackUrl: "/login" });
+  }, []);
+
+  if (((status === "loading" || !workspaceSessionChecked) && !dashboardSession) || loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-background">
         <div className="text-center">
@@ -1318,7 +1358,7 @@ export default function DashboardPage() {
     );
   }
 
-  if (!session) return null;
+  if (!dashboardSession) return null;
 
   if (setupPending) {
     return (
@@ -1334,7 +1374,7 @@ export default function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={handleSignOut}
             >
               <LogOut className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Deconnexion</span>
@@ -1379,7 +1419,7 @@ export default function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={handleSignOut}
             >
               <LogOut className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Deconnexion</span>
@@ -1436,7 +1476,7 @@ export default function DashboardPage() {
               </Link>
             </Button>
             <span className="hidden sm:inline text-xs text-muted-foreground">
-              {session.user?.email}
+              {dashboardSession.email}
             </span>
             <Button
               variant="ghost"
@@ -1449,7 +1489,7 @@ export default function DashboardPage() {
             <Button
               variant="ghost"
               size="sm"
-              onClick={() => signOut({ callbackUrl: "/login" })}
+              onClick={handleSignOut}
             >
               <LogOut className="w-4 h-4 mr-1.5" />
               <span className="hidden sm:inline">Déconnexion</span>
