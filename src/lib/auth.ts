@@ -7,8 +7,9 @@ import {
   initializeApp as initializeAdminApp,
 } from "firebase-admin/app";
 import { getFirestore } from "firebase-admin/firestore";
-import { getApps, initializeApp, type FirebaseOptions } from "firebase/app";
+import { getApps, initializeApp } from "firebase/app";
 import { getAuth, signInWithEmailAndPassword } from "firebase/auth";
+import { getFirebasePublicConfig } from "./firebaseConfig";
 
 type SafeFirestoreDoc = {
   exists?: boolean;
@@ -33,16 +34,6 @@ type AdminCompat = {
 };
 
 const adminCompat = admin as unknown as AdminCompat;
-
-const FIREBASE_PROJECT_ID = "codeqrmenu-525a7";
-const FIREBASE_PUBLIC_CONFIG: FirebaseOptions = {
-  apiKey: "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU",
-  authDomain: "codeqrmenu-525a7.firebaseapp.com",
-  projectId: FIREBASE_PROJECT_ID,
-  storageBucket: "codeqrmenu-525a7.firebasestorage.app",
-  messagingSenderId: "942948658860",
-  appId: "1:942948658860:web:989313482a946d96a1f909",
-};
 
 declare module "next-auth" {
   interface Session extends DefaultSession {
@@ -72,12 +63,16 @@ function getStringEnv(name: string) {
   return typeof value === "string" && value.trim() ? value.trim() : undefined;
 }
 
+function getFirebaseProjectId() {
+  return getStringEnv("FIREBASE_PROJECT_ID") || getFirebasePublicConfig().projectId;
+}
+
 function getFirebaseClientAuth() {
   try {
     const firebaseApps = typeof getApps === "function" ? getApps() : [];
     const app = Array.isArray(firebaseApps) && firebaseApps[0]
       ? firebaseApps[0]
-      : initializeApp(FIREBASE_PUBLIC_CONFIG);
+      : initializeApp(getFirebasePublicConfig());
 
     return getAuth(app);
   } catch (error) {
@@ -88,7 +83,7 @@ function getFirebaseClientAuth() {
 
 function getFirebaseAdminFirestore(): SafeFirestore | null {
   try {
-    const projectId = FIREBASE_PROJECT_ID;
+    const projectId = getFirebaseProjectId();
     const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
     const privateKey = process.env.FIREBASE_PRIVATE_KEY
       ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")
@@ -143,7 +138,7 @@ function normalizeRole(role: unknown) {
 
 function getAdminCompatFirestore(): SafeFirestore | null {
   try {
-    const projectId = FIREBASE_PROJECT_ID;
+    const projectId = getFirebaseProjectId();
     const clientEmail = getStringEnv("FIREBASE_CLIENT_EMAIL");
     const privateKey = process.env.FIREBASE_PRIVATE_KEY
       ? process.env.FIREBASE_PRIVATE_KEY.replace(/\\n/g, "\n")

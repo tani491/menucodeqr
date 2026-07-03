@@ -120,6 +120,14 @@ const EMPTY_FORM: ItemFormData = {
 type FirestoreRecord = Record<string, unknown>;
 
 const FIRESTORE_DASHBOARD_TIMEOUT_MS = 12000;
+const MAX_FIRESTORE_IMAGE_BYTES = 750_000;
+const MAX_RESTAURANT_SINGLE_MEDIA_BYTES = 380_000;
+const MAX_RESTAURANT_MEDIA_BYTES = 850_000;
+const IMAGE_COMPRESSION_ATTEMPTS = [
+  { maxWidth: 500, quality: 0.7 },
+  { maxWidth: 420, quality: 0.62 },
+  { maxWidth: 320, quality: 0.55 },
+] as const;
 
 function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string) {
   let timeoutId: ReturnType<typeof setTimeout> | undefined;
@@ -281,13 +289,99 @@ async function getDashboardMenuFromFirestore(userId: string): Promise<MenuRespon
   };
 }
 
-const fileToBase64 = (file: File): Promise<string> =>
-  new Promise((resolve, reject) => {
+function isBase64Image(value: string) {
+  return value.startsWith("data:image/");
+}
+
+function combinedMediaSize(...values: string[]) {
+  return values.reduce((total, value) => total + value.length, 0);
+}
+
+const compressImageSourceToBase64 = (
+  source: string,
+  maxBytes = MAX_FIRESTORE_IMAGE_BYTES
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => {
+      if (!img.width || !img.height) {
+        reject(new Error("L'image selectionnee est invalide."));
+        return;
+      }
+
+      let smallestImage = "";
+
+      for (const attempt of IMAGE_COMPRESSION_ATTEMPTS) {
+        const canvas = document.createElement("canvas");
+        let width = img.width;
+        let height = img.height;
+
+        if (width > attempt.maxWidth) {
+          height = Math.round((height * attempt.maxWidth) / width);
+          width = attempt.maxWidth;
+        }
+
+        canvas.width = width;
+        canvas.height = height;
+        const ctx = canvas.getContext("2d");
+
+        if (!ctx) {
+          reject(new Error("Impossible de compresser l'image selectionnee."));
+          return;
+        }
+
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, width, height);
+        ctx.drawImage(img, 0, 0, width, height);
+
+        const compressedBase64 = canvas.toDataURL("image/jpeg", attempt.quality);
+        if (!smallestImage || compressedBase64.length < smallestImage.length) {
+          smallestImage = compressedBase64;
+        }
+
+        if (compressedBase64.length <= maxBytes) {
+          resolve(compressedBase64);
+          return;
+        }
+      }
+
+      reject(
+        new Error(
+          `Image trop volumineuse apres compression (${Math.ceil(
+            smallestImage.length / 1024
+          )} Ko). Choisis une image plus legere.`
+        )
+      );
+    };
+    img.onerror = (error) => reject(error);
+    img.src = source;
+  });
+};
+
+const compressAndToBase64 = (
+  file: File,
+  maxBytes = MAX_FIRESTORE_IMAGE_BYTES
+): Promise<string> => {
+  return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.readAsDataURL(file);
-    reader.onload = () => resolve(reader.result as string);
+    reader.onload = async (event) => {
+      const result = event.target?.result;
+
+      if (typeof result !== "string") {
+        reject(new Error("Impossible de lire l'image selectionnee."));
+        return;
+      }
+
+      try {
+        resolve(await compressImageSourceToBase64(result, maxBytes));
+      } catch (error) {
+        reject(error);
+      }
+    };
     reader.onerror = (error) => reject(error);
   });
+};
 
 function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
   const [qrPngUrl, setQrPngUrl] = useState<string | null>(null);
@@ -586,25 +680,43 @@ function RestaurantMediaSection({
 
       let nextLogo = logo;
       let nextBanner = banner;
+      const mediaUpdate: Record<string, string> = {
+        primaryColor,
+        couleur: primaryColor,
+        color: primaryColor,
+        updatedAt: new Date().toISOString(),
+      };
 
       if (logoFile) {
-        nextLogo = await fileToBase64(logoFile);
+        nextLogo = await compressAndToBase64(logoFile, MAX_RESTAURANT_SINGLE_MEDIA_BYTES);
+        mediaUpdate.logoUrl = nextLogo;
       }
 
       if (bannerFile) {
-        nextBanner = await fileToBase64(bannerFile);
+        nextBanner = await compressAndToBase64(bannerFile, MAX_RESTAURANT_SINGLE_MEDIA_BYTES);
+        mediaUpdate.bannerUrl = nextBanner;
+        mediaUpdate.banniereUrl = nextBanner;
+      }
+
+      if (combinedMediaSize(nextLogo, nextBanner) > MAX_RESTAURANT_MEDIA_BYTES) {
+        if (!logoFile && isBase64Image(nextLogo)) {
+          nextLogo = await compressImageSourceToBase64(nextLogo, MAX_RESTAURANT_SINGLE_MEDIA_BYTES);
+          mediaUpdate.logoUrl = nextLogo;
+        }
+
+        if (!bannerFile && isBase64Image(nextBanner)) {
+          nextBanner = await compressImageSourceToBase64(nextBanner, MAX_RESTAURANT_SINGLE_MEDIA_BYTES);
+          mediaUpdate.bannerUrl = nextBanner;
+          mediaUpdate.banniereUrl = nextBanner;
+        }
+      }
+
+      if (combinedMediaSize(nextLogo, nextBanner) > MAX_RESTAURANT_MEDIA_BYTES) {
+        throw new Error("Logo et banniere restent trop volumineux pour Firestore apres compression.");
       }
 
       await withTimeout(
-        updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), {
-          logoUrl: nextLogo || "",
-          bannerUrl: nextBanner || "",
-          banniereUrl: nextBanner || "",
-          primaryColor,
-          couleur: primaryColor,
-          color: primaryColor,
-          updatedAt: new Date().toISOString(),
-        }),
+        updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), mediaUpdate),
         FIRESTORE_DASHBOARD_TIMEOUT_MS,
         "Delai depasse lors de l'enregistrement des medias."
       );
@@ -881,7 +993,7 @@ function ItemFormDialog({
           <FileUploadField
             label="Image du plat"
             accept="image/jpeg,image/webp"
-            maxSizeMb={5}
+            maxSizeMb={12}
             value={form.imageFile?.name || form.imageUrl}
             onChange={(file) =>
               setForm({ ...form, imageFile: file, imageUrl: file ? form.imageUrl : "" })
@@ -1098,10 +1210,12 @@ export default function DashboardPage() {
         }
 
         const now = new Date().toISOString();
-        let nextImageUrl = formData.imageUrl || "";
+        const imagePatch: { imageUrl?: string } = {};
 
         if (formData.imageFile) {
-          nextImageUrl = await fileToBase64(formData.imageFile);
+          imagePatch.imageUrl = await compressAndToBase64(formData.imageFile);
+        } else if (!formData.imageUrl) {
+          imagePatch.imageUrl = "";
         }
 
         const payload = {
@@ -1114,7 +1228,6 @@ export default function DashboardPage() {
           price,
           category: formData.categoryId,
           categoryId: formData.categoryId,
-          imageUrl: nextImageUrl,
           videoUrl: null,
           isAvailable: formData.isAvailable,
           status: formData.isAvailable ? "available" : "unavailable",
@@ -1124,6 +1237,7 @@ export default function DashboardPage() {
           await withTimeout(
             updateDoc(doc(firestoreDb, formData.sourceCollection || "dishes", itemId), {
               ...payload,
+              ...imagePatch,
               updatedAt: now,
             }),
             FIRESTORE_DASHBOARD_TIMEOUT_MS,
@@ -1131,9 +1245,14 @@ export default function DashboardPage() {
           );
           toast.success(`\"${payload.nameFr}\" mis à jour`);
         } else {
+          const createPayload = {
+            ...payload,
+            imageUrl: imagePatch.imageUrl || "",
+          };
+
           const createdDishRef = await withTimeout(
             addDoc(collection(firestoreDb, "dishes"), {
-              ...payload,
+              ...createPayload,
               restaurantId: activeRestaurantId,
               createdAt: now,
               updatedAt: now,
@@ -1154,7 +1273,7 @@ export default function DashboardPage() {
                       descriptionFr: payload.descriptionFr,
                       descriptionEn: payload.descriptionEn,
                       price: payload.price,
-                      imageUrl: payload.imageUrl,
+                      imageUrl: createPayload.imageUrl,
                       videoUrl: payload.videoUrl,
                       isAvailable: payload.isAvailable,
                       categoryId: payload.categoryId,

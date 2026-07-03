@@ -1,7 +1,11 @@
-export async function verifyFirebaseEmailPassword(email: string, password: string) {
-  const apiKey = "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU";
+import { getFirebasePublicConfig } from "./firebaseConfig";
 
-  if (!apiKey) {
+export async function verifyFirebaseEmailPassword(email: string, password: string) {
+  let apiKey = "";
+
+  try {
+    apiKey = getFirebasePublicConfig().apiKey || "";
+  } catch {
     return null;
   }
 

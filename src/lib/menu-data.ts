@@ -1,5 +1,6 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
 import { collection, getDocs, getFirestore, query, where, type Firestore } from "firebase/firestore";
+import { getFirebasePublicConfig } from "./firebaseConfig";
 import { cache } from "react";
 
 // ─── Types publics ──────────────────────────────────────────────────────────
@@ -57,21 +58,7 @@ function getMenuFirestoreDb() {
     return cachedFirestoreDb;
   }
 
-  const firebaseConfig = {
-    apiKey: "AIzaSyBUJunuUW_346uq0lygcouc_66wrBIkYNU",
-    authDomain: "codeqrmenu-525a7.firebaseapp.com",
-    projectId: "codeqrmenu-525a7",
-    storageBucket: "codeqrmenu-525a7.firebasestorage.app",
-    messagingSenderId: "942948658860",
-    appId: "1:942948658860:web:989313482a946d96a1f909",
-  };
-
-  if (!firebaseConfig.apiKey || !firebaseConfig.projectId || !firebaseConfig.appId) {
-    cachedFirestoreDb = null;
-    return cachedFirestoreDb;
-  }
-
-  const app = getApps().length ? getApp() : initializeApp(firebaseConfig);
+  const app = getApps().length ? getApp() : initializeApp(getFirebasePublicConfig());
   cachedFirestoreDb = getFirestore(app);
   return cachedFirestoreDb;
 }
