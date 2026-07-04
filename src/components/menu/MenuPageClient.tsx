@@ -173,6 +173,8 @@ function RestaurantHeader({
           <img
             src={restaurant.bannerUrl}
             alt={`Bannière de ${restaurant.name}`}
+            loading="lazy"
+            decoding="async"
             className="w-full h-full object-cover"
           />
           {/* Dégradé sombre en bas pour la lisibilité */}
@@ -181,32 +183,38 @@ function RestaurantHeader({
       )}
 
       {/* Info du restaurant sous la bannière */}
-      <div
-        className={`relative z-10 flex items-center gap-4 border-b bg-white px-4 py-5 shadow-sm ${
-          !restaurant.bannerUrl ? "pt-6" : ""
-        }`}
-      >
-        {/* Logo */}
-        {restaurant.logoUrl && (
-          <div
-            className="flex-shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white"
-          >
-            <img
-              src={restaurant.logoUrl}
-              alt={`Logo de ${restaurant.name}`}
-              className="w-full h-full object-cover"
-            />
+      <div className="relative z-10 border-b bg-white shadow-sm">
+        <div
+          className={`flex items-center gap-4 px-4 pb-5 ${
+            restaurant.bannerUrl ? "pt-3" : "pt-6"
+          }`}
+        >
+          {/* Logo */}
+          {restaurant.logoUrl && (
+            <div
+              className={`flex-shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white ${
+                restaurant.bannerUrl ? "-mt-10" : ""
+              }`}
+            >
+              <img
+                src={restaurant.logoUrl}
+                alt={`Logo de ${restaurant.name}`}
+                loading="lazy"
+                decoding="async"
+                className="w-full h-full object-cover"
+              />
+            </div>
+          )}
+          <div className={`flex-1 min-w-0 pl-1 ${restaurant.bannerUrl ? "-mt-2" : ""}`}>
+            <h1 className="text-3xl sm:text-4xl font-black leading-tight break-words">
+              <span style={{ color: brandColor }}>
+                {restaurant.name}
+              </span>
+            </h1>
+            <p className="mt-1 text-sm text-muted-foreground">
+              {/* menuSubtitle is rendered in CategoryBar with lang context */}
+            </p>
           </div>
-        )}
-        <div className="flex-1 min-w-0 pl-1">
-          <h1 className="text-3xl sm:text-4xl font-black leading-tight break-words">
-            <span style={{ color: brandColor }}>
-              {restaurant.name}
-            </span>
-          </h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            {/* menuSubtitle is rendered in CategoryBar with lang context */}
-          </p>
         </div>
       </div>
     </header>
@@ -329,6 +337,7 @@ function MenuItemCard({
               src={item.imageUrl}
               alt={name}
               loading="lazy"
+              decoding="async"
               className={`
                 w-full h-full object-cover transition-transform duration-300
                 ${!unavailable ? "hover:scale-105" : "grayscale"}
@@ -488,6 +497,8 @@ function DishDetailModal({
             <img
               src={item.imageUrl}
               alt={name}
+              loading="lazy"
+              decoding="async"
               className="h-[58vh] w-full object-cover bg-black sm:max-h-[60vh]"
             />
           ) : (

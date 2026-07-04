@@ -19,6 +19,7 @@ import {
   collection,
   doc,
   getDocs,
+  limit,
   onSnapshot,
   query,
   updateDoc,
@@ -141,7 +142,8 @@ function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
 function ordersQuery(restaurantId: string) {
   return query(
     collection(firestoreDb, "orders"),
-    where("restaurantId", "==", restaurantId)
+    where("restaurantId", "==", restaurantId),
+    limit(50)
   );
 }
 

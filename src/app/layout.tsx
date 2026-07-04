@@ -11,15 +11,14 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "Menu QR — Restaurant Digital",
-  description:
-    "Consultez le menu de votre restaurant en scannant le QR code. Interface mobile-first ultra-rapide.",
+  title: "MenuCodeQR",
+  description: "Votre menu digital",
   icons: {
-    icon: "https://z-cdn.chatglm.cn/z-ai/static/logo.svg",
+    icon: "/favicon.svg",
   },
   openGraph: {
-    title: "Menu QR — Restaurant Digital",
-    description: "Menu digital interactif pour restaurants.",
+    title: "MenuCodeQR",
+    description: "Votre menu digital",
     type: "website",
   },
 };

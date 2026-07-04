@@ -1,5 +1,13 @@
 import { getApp, getApps, initializeApp } from "firebase/app";
-import { collection, getDocs, getFirestore, query, where, type Firestore } from "firebase/firestore";
+import {
+  collection,
+  getDocs,
+  getFirestore,
+  limit,
+  query,
+  where,
+  type Firestore,
+} from "firebase/firestore";
 import { getFirebasePublicConfig } from "./firebaseConfig";
 import { cache } from "react";
 
@@ -113,6 +121,23 @@ function sortableDateValue(value: unknown) {
   return 0;
 }
 
+function publicRestaurantValue(
+  restaurant: FirestoreRecord,
+  restaurantId: string,
+  slug: string,
+  isSuspended: boolean
+): MenuRestaurant {
+  return {
+    id: restaurantId,
+    slug: stringValue(restaurant.slug, slug),
+    name: stringValue(restaurant.name),
+    logoUrl: nullableStringValue(restaurant.logoUrl),
+    bannerUrl: nullableStringValue(restaurant.bannerUrl),
+    primaryColor: restaurantColorValue(restaurant),
+    isSuspended,
+  };
+}
+
 // ─── Data fetcher avec cache ISR-like ───────────────────────────────────────
 
 async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
@@ -126,7 +151,7 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   if (!db) return null;
 
   const restaurantsSnapshot = await getDocs(
-    query(collection(db, "restaurants"), where("slug", "==", slug))
+    query(collection(db, "restaurants"), where("slug", "==", slug), limit(1))
   );
 
   const restaurantDoc = restaurantsSnapshot.docs[0];
@@ -137,18 +162,16 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   const restaurantIsSuspended =
     stringValue(restaurantData.status) === "suspended" ||
     booleanValue(restaurantData.isSuspended);
+  const publicRestaurant = publicRestaurantValue(
+    restaurantData,
+    restaurantId,
+    slug,
+    restaurantIsSuspended
+  );
 
   if (restaurantIsSuspended) {
     return {
-      restaurant: {
-        id: restaurantId,
-        slug: stringValue(restaurantData.slug, slug),
-        name: stringValue(restaurantData.name),
-        logoUrl: nullableStringValue(restaurantData.logoUrl),
-        bannerUrl: nullableStringValue(restaurantData.bannerUrl),
-        primaryColor: restaurantColorValue(restaurantData),
-        isSuspended: true,
-      },
+      restaurant: publicRestaurant,
       categories: [],
       items: [],
     };
@@ -215,15 +238,7 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
     .sort((a, b) => a.sortOrder - b.sortOrder);
 
   const data: MenuData = {
-    restaurant: {
-      id: restaurantId,
-      slug: stringValue(restaurantData.slug, slug),
-      name: stringValue(restaurantData.name),
-      logoUrl: nullableStringValue(restaurantData.logoUrl),
-      bannerUrl: nullableStringValue(restaurantData.bannerUrl),
-      primaryColor: restaurantColorValue(restaurantData),
-      isSuspended: restaurantIsSuspended,
-    },
+    restaurant: publicRestaurant,
     categories,
     items,
   };
