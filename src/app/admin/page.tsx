@@ -139,7 +139,7 @@ function CreateRestaurantDialog({
     name: "",
     slug: "",
     managerEmail: "",
-    password: "Resto2026!",
+    password: "",
     bannerUrl: "",
   });
   const [saving, setSaving] = useState(false);
@@ -205,7 +205,7 @@ function CreateRestaurantDialog({
         authProvider: "firebase",
         createdAt,
         updatedAt: createdAt,
-        mustChangePassword: true,
+        mustChangePassword: false,
         initialPasswordCreatedAt: createdAt,
         passwordUpdatedAt: null,
       });
@@ -251,7 +251,7 @@ function CreateRestaurantDialog({
         name: "",
         slug: "",
         managerEmail: "",
-        password: "Resto2026!",
+        password: "",
         bannerUrl: "",
       });
       onOpenChange(false);
@@ -341,13 +341,13 @@ function CreateRestaurantDialog({
             />
           </div>
           <div className="space-y-2">
-            <Label htmlFor="r-password">Mot de passe temporaire *</Label>
+            <Label htmlFor="r-password">Mot de passe *</Label>
             <Input
               id="r-password"
-              type="text"
+              type="password"
               value={form.password}
               onChange={(e) => setForm({ ...form, password: e.target.value })}
-              placeholder="Resto2026!"
+              placeholder="Saisir un mot de passe"
               required
               minLength={6}
               disabled={saving}

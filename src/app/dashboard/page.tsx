@@ -10,7 +10,6 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
-import PasswordSettingsDialog from "@/components/PasswordSettingsDialog";
 import {
   clearWorkspaceSession,
   readWorkspaceSession,
@@ -1070,7 +1069,6 @@ export default function DashboardPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [dialogOpen, setDialogOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
   const [setupPending, setSetupPending] = useState(false);
@@ -1478,13 +1476,11 @@ export default function DashboardPage() {
             <span className="hidden sm:inline text-xs text-muted-foreground">
               {dashboardSession.email}
             </span>
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={() => setSettingsOpen(true)}
-            >
-              <Settings className="w-4 h-4 mr-1.5" />
-              <span className="hidden sm:inline">Parametres</span>
+            <Button asChild variant="ghost" size="sm">
+              <Link href="/dashboard/parametres">
+                <Settings className="w-4 h-4 mr-1.5" />
+                <span className="hidden sm:inline">Parametres</span>
+              </Link>
             </Button>
             <Button
               variant="ghost"
@@ -1675,7 +1671,6 @@ export default function DashboardPage() {
         open={dialogOpen}
         onOpenChange={setDialogOpen}
       />
-      <PasswordSettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
     </div>
   );
 }

@@ -180,18 +180,16 @@ function RestaurantHeader({
         </div>
       )}
 
-      {/* Info du restaurant — overlay sur la bannière */}
+      {/* Info du restaurant sous la bannière */}
       <div
-        className={`relative flex items-start gap-4 px-4 pb-5 -mt-14 z-10 ${
-          !restaurant.bannerUrl ? "mt-0 pt-5" : ""
+        className={`relative z-10 flex items-center gap-4 border-b bg-white px-4 py-5 shadow-sm ${
+          !restaurant.bannerUrl ? "pt-6" : ""
         }`}
       >
         {/* Logo */}
         {restaurant.logoUrl && (
           <div
-            className={`flex-shrink-0 w-20 h-20 sm:w-24 sm:h-24 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white ${
-              restaurant.bannerUrl ? "mt-7" : "mt-1"
-            }`}
+            className="flex-shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-xl overflow-hidden border-2 border-white shadow-lg bg-white"
           >
             <img
               src={restaurant.logoUrl}
@@ -200,13 +198,13 @@ function RestaurantHeader({
             />
           </div>
         )}
-        <div className={`flex-1 min-w-0 pb-2 pl-1 ${restaurant.logoUrl ? "pt-4 sm:pt-5" : "pt-1"}`}>
-          <h1 className="text-xl sm:text-2xl font-bold text-black drop-shadow-md truncate">
-            <span style={!restaurant.bannerUrl ? { color: brandColor } : undefined}>
+        <div className="flex-1 min-w-0 pl-1">
+          <h1 className="text-3xl sm:text-4xl font-black leading-tight break-words">
+            <span style={{ color: brandColor }}>
               {restaurant.name}
             </span>
           </h1>
-          <p className="text-sm text-white/80 drop-shadow-sm mt-0.5">
+          <p className="mt-1 text-sm text-muted-foreground">
             {/* menuSubtitle is rendered in CategoryBar with lang context */}
           </p>
         </div>

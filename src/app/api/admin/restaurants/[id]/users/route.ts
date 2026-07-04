@@ -99,7 +99,7 @@ export async function POST(
         restaurantId,
         status: "active",
         authProvider: "firebase",
-        mustChangePassword: true,
+        mustChangePassword: false,
         initialPasswordCreatedAt: now,
         passwordUpdatedAt: null,
         updatedAt: now,
