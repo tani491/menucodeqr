@@ -11,6 +11,14 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   clearWorkspaceSession,
   readWorkspaceSession,
   rememberWorkspaceSession,
@@ -52,6 +60,7 @@ import {
   ExternalLink,
   Settings,
   ClipboardList,
+  Menu,
 } from "lucide-react";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -450,7 +459,7 @@ function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
 
   return (
     <div className="space-y-4">
-      <div className="max-w-xs space-y-2">
+      <div className="w-full space-y-2 md:max-w-xs">
         <Label htmlFor="qr-table-number">Numero de table</Label>
         <Input
           id="qr-table-number"
@@ -459,14 +468,17 @@ function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
             setTableNumber(e.target.value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 20) || "1")
           }
           disabled={loading}
+          className="w-full"
         />
       </div>
-      <div className="flex flex-wrap items-center gap-3">
+      {/* Mobile : boutons empiles et tactiles. Desktop : disposition en ligne. */}
+      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
         <Button
           onClick={() => generateQr("png")}
           disabled={loading}
           variant="outline"
           size="sm"
+          className="w-full md:w-auto"
         >
           <QrCode className="w-4 h-4 mr-1.5" />
           {loading ? "Génération..." : "Générer QR PNG"}
@@ -476,6 +488,7 @@ function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
           disabled={loading}
           variant="outline"
           size="sm"
+          className="w-full md:w-auto"
         >
           <QrCode className="w-4 h-4 mr-1.5" />
           {loading ? "Génération..." : "Générer QR SVG"}
@@ -754,8 +767,9 @@ function RestaurantMediaSection({
           Logo et banniere du menu public
         </p>
       </div>
-      <div className="grid gap-4 sm:grid-cols-2">
-        <div className="space-y-3">
+      {/* Mobile-first : les deux medias s'empilent jusqu'au breakpoint md. */}
+      <div className="grid grid-cols-1 gap-6 md:grid-cols-2 md:gap-4">
+        <div className="min-w-0 space-y-3">
           {(logoPreview || logo) && (
             <img
               src={logoPreview || logo}
@@ -771,14 +785,14 @@ function RestaurantMediaSection({
               accept="image/*"
               disabled={saving}
               onChange={(e) => selectLogo(e.target.files?.[0] || null)}
-              className="text-sm"
+              className="w-full min-w-0 text-sm"
             />
           </div>
           {logo && !logoFile && (
             <p className="text-xs text-muted-foreground truncate">{logo}</p>
           )}
         </div>
-        <div className="space-y-3">
+        <div className="min-w-0 space-y-3">
           {(bannerPreview || banner) && (
             <img
               src={bannerPreview || banner}
@@ -794,7 +808,7 @@ function RestaurantMediaSection({
               accept="image/*"
               disabled={saving}
               onChange={(e) => selectBanner(e.target.files?.[0] || null)}
-              className="text-sm"
+              className="w-full min-w-0 text-sm"
             />
           </div>
           {banner && !bannerFile && (
@@ -820,6 +834,7 @@ function RestaurantMediaSection({
         type="button"
         size="sm"
         onClick={handleSave}
+        className="w-full md:w-auto"
         disabled={
           saving ||
           (!logoFile &&
@@ -1448,9 +1463,73 @@ export default function DashboardPage() {
     <div className="min-h-screen bg-background">
       {/* Header */}
       <header className="sticky top-0 z-40 bg-white/90 backdrop-blur-md border-b">
-        <div className="max-w-4xl mx-auto px-4 h-14 flex items-center justify-between">
+        {/* Mobile : en-tete compact avec toutes les actions dans le menu burger. */}
+        <div className="mx-auto flex h-14 max-w-4xl items-center justify-between px-4 md:hidden">
+          <div className="flex min-w-0 items-center gap-2">
+            <h1 className="shrink-0 text-sm font-semibold">Tableau de bord</h1>
+            <Badge variant="secondary" className="max-w-[9rem] truncate text-[10px]">
+              {data.restaurantName || "Restaurant"}
+            </Badge>
+          </div>
+
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="ml-2 h-9 w-9 shrink-0 p-0"
+                aria-label="Ouvrir le menu de navigation"
+              >
+                <Menu className="h-5 w-5" />
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-64">
+              <DropdownMenuLabel className="truncate text-xs font-normal text-muted-foreground">
+                {dashboardSession.email}
+              </DropdownMenuLabel>
+              <DropdownMenuSeparator />
+
+              {data.restaurantSlug && (
+                <DropdownMenuItem
+                  onSelect={() => window.open(`/menu/${data.restaurantSlug}`, "_blank")}
+                  className="min-h-10 cursor-pointer"
+                >
+                  <ExternalLink />
+                  Voir le menu
+                </DropdownMenuItem>
+              )}
+
+              <DropdownMenuItem asChild className="min-h-10 cursor-pointer">
+                <Link href="/dashboard/orders">
+                  <ClipboardList />
+                  Commandes
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuItem asChild className="min-h-10 cursor-pointer">
+                <Link href="/dashboard/parametres">
+                  <Settings />
+                  Parametres
+                </Link>
+              </DropdownMenuItem>
+
+              <DropdownMenuSeparator />
+              <DropdownMenuItem
+                variant="destructive"
+                onSelect={handleSignOut}
+                className="min-h-10 cursor-pointer"
+              >
+                <LogOut />
+                Deconnexion
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Desktop (md+) : disposition horizontale existante conservee. */}
+        <div className="mx-auto hidden h-14 max-w-4xl items-center justify-between px-4 md:flex">
           <div className="flex items-center gap-2">
-            <h1 className="font-semibold text-sm sm:text-base">Tableau de bord</h1>
+            <h1 className="text-base font-semibold">Tableau de bord</h1>
             <Badge variant="secondary" className="text-[10px]">
               {data.restaurantName || "Restaurant"}
             </Badge>
@@ -1460,26 +1539,26 @@ export default function DashboardPage() {
               <Button
                 variant="ghost"
                 size="sm"
-                className="hidden sm:flex h-8 text-xs"
+                className="h-8 text-xs"
                 onClick={() => window.open(`/menu/${data.restaurantSlug}`, "_blank")}
               >
                 <ExternalLink className="w-3.5 h-3.5 mr-1" />
                 Voir le menu
               </Button>
             )}
-            <Button asChild variant="ghost" size="sm" className="hidden sm:flex h-8 text-xs">
+            <Button asChild variant="ghost" size="sm" className="h-8 text-xs">
               <Link href="/dashboard/orders">
                 <ClipboardList className="w-3.5 h-3.5 mr-1" />
                 Commandes
               </Link>
             </Button>
-            <span className="hidden sm:inline text-xs text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {dashboardSession.email}
             </span>
             <Button asChild variant="ghost" size="sm">
               <Link href="/dashboard/parametres">
                 <Settings className="w-4 h-4 mr-1.5" />
-                <span className="hidden sm:inline">Parametres</span>
+                <span>Parametres</span>
               </Link>
             </Button>
             <Button
@@ -1488,7 +1567,7 @@ export default function DashboardPage() {
               onClick={handleSignOut}
             >
               <LogOut className="w-4 h-4 mr-1.5" />
-              <span className="hidden sm:inline">Déconnexion</span>
+              <span>Déconnexion</span>
             </Button>
           </div>
         </div>
