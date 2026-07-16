@@ -1686,7 +1686,7 @@ export default function DashboardPage() {
                           ${item.isAvailable ? "bg-card" : "bg-muted/40 border-muted"}
                         `}
                       >
-                        {/* Photo miniature */}
+                        {/* Photo / vidéo miniature */}
                         {item.imageUrl ? (
                           <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden relative">
                             <img
@@ -1700,6 +1700,16 @@ export default function DashboardPage() {
                                 <Video className="w-2.5 h-2.5 text-white" />
                               </div>
                             )}
+                          </div>
+                        ) : item.videoUrl ? (
+                          <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-muted">
+                            <video
+                              src={item.videoUrl}
+                              muted
+                              playsInline
+                              preload="metadata"
+                              className={`w-full h-full rounded-lg object-cover ${!item.isAvailable ? "grayscale opacity-50" : ""}`}
+                            />
                           </div>
                         ) : (
                           <div className="flex-shrink-0 w-12 h-12 rounded-lg bg-muted flex items-center justify-center">
