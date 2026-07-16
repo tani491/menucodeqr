@@ -135,6 +135,9 @@ const EMPTY_FORM: ItemFormData = {
 type FirestoreRecord = Record<string, unknown>;
 
 const FIRESTORE_DASHBOARD_TIMEOUT_MS = 12000;
+const CLOUDINARY_VIDEO_UPLOAD_URL =
+  "https://api.cloudinary.com/v1_1/qpmc4yfm/video/upload";
+const CLOUDINARY_UNSIGNED_UPLOAD_PRESET = "menu_restau";
 const MAX_FIRESTORE_IMAGE_BYTES = 750_000;
 const MAX_RESTAURANT_SINGLE_MEDIA_BYTES = 380_000;
 const MAX_RESTAURANT_MEDIA_BYTES = 850_000;
@@ -158,6 +161,36 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, message: string)
 
 function stringValue(value: unknown, fallback = "") {
   return typeof value === "string" && value.trim() ? value : fallback;
+}
+
+/**
+ * Envoie le fichier vidéo brut à Cloudinary avec le preset non signé.
+ * Seule l'URL HTTPS retournée est ensuite destinée à être stockée dans Firestore.
+ */
+async function uploadVideoToCloudinary(file: File): Promise<string> {
+  const cloudinaryFormData = new FormData();
+  cloudinaryFormData.append("file", file);
+  cloudinaryFormData.append("upload_preset", CLOUDINARY_UNSIGNED_UPLOAD_PRESET);
+
+  const response = await fetch(CLOUDINARY_VIDEO_UPLOAD_URL, {
+    method: "POST",
+    body: cloudinaryFormData,
+  });
+
+  const result = (await response.json()) as {
+    secure_url?: unknown;
+    error?: { message?: string };
+  };
+
+  if (!response.ok) {
+    throw new Error(result.error?.message || "L'upload de la vidéo vers Cloudinary a échoué.");
+  }
+
+  if (typeof result.secure_url !== "string" || !result.secure_url.startsWith("https://")) {
+    throw new Error("Cloudinary n'a pas renvoyé une URL vidéo sécurisée valide.");
+  }
+
+  return result.secure_url;
 }
 
 function firstStringValue(...values: unknown[]) {
@@ -1266,6 +1299,12 @@ export default function DashboardPage() {
           imagePatch.imageUrl = "";
         }
 
+        // Le binaire vidéo part vers Cloudinary, jamais vers Firestore.
+        // En édition, l'URL existante est conservée si aucune nouvelle vidéo n'est choisie.
+        const videoUrl = formData.videoFile
+          ? await uploadVideoToCloudinary(formData.videoFile)
+          : formData.videoUrl.trim() || null;
+
         const payload = {
           name: formData.nameFr.trim(),
           nameFr: formData.nameFr.trim(),
@@ -1276,7 +1315,7 @@ export default function DashboardPage() {
           price,
           category: formData.categoryId,
           categoryId: formData.categoryId,
-          videoUrl: null,
+          videoUrl,
           isAvailable: formData.isAvailable,
           status: formData.isAvailable ? "available" : "unavailable",
         };

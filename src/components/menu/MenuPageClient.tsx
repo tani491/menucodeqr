@@ -346,13 +346,13 @@ function MenuItemCard({
           ) : (
             <video
               src={item.videoUrl!}
-              className={`w-full h-full object-cover ${unavailable ? "grayscale" : ""}`}
+              controls
               muted
               loop
               playsInline
               autoPlay
               preload="metadata"
-              poster=""
+              className={`w-full h-auto rounded-lg object-cover ${unavailable ? "grayscale" : ""}`}
             />
           )}
           {/* Icône Play si vidéo disponible */}
@@ -368,7 +368,7 @@ function MenuItemCard({
         <div
           className={`
             flex-shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-lg
-            flex items-center justify-center bg-muted
+            flex items-center justify-center bg-muted [&>span]:hidden
             ${unavailable ? "opacity-50" : ""}
           `}
         >
@@ -485,12 +485,12 @@ function DishDetailModal({
           {item.videoUrl ? (
             <video
               src={item.videoUrl}
-              className="h-[58vh] w-full object-cover bg-black sm:max-h-[60vh]"
               controls
               muted
               loop
               playsInline
               autoPlay
+              className="w-full h-auto rounded-lg"
               poster={item.imageUrl || undefined}
             />
           ) : item.imageUrl ? (
@@ -502,7 +502,7 @@ function DishDetailModal({
               className="h-[58vh] w-full object-cover bg-black sm:max-h-[60vh]"
             />
           ) : (
-            <div className="flex h-[58vh] items-center justify-center bg-muted sm:h-80">
+            <div className="flex h-[58vh] items-center justify-center bg-muted sm:h-80 [&>span]:hidden">
               <span className="text-5xl">ðŸ½ï¸</span>
             </div>
           )}
