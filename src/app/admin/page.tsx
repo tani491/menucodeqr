@@ -37,7 +37,7 @@ import { toast } from "sonner";
 import { db, firebaseConfig } from "@/lib/firebaseClient";
 import { deleteApp, initializeApp } from "firebase/app";
 import { createUserWithEmailAndPassword, getAuth } from "firebase/auth";
-import { addDoc, collection, doc, getDocs, setDoc, updateDoc } from "firebase/firestore";
+import { addDoc, collection, deleteDoc, doc, getDocs, query, setDoc, updateDoc, where } from "firebase/firestore";
 import {
   Plus,
   LogOut,
@@ -48,6 +48,7 @@ import {
   Loader2,
   Eye,
   Settings,
+  Trash2,
   UserPlus,
 } from "lucide-react";
 
@@ -566,6 +567,7 @@ export default function AdminPage() {
   const [loading, setLoading] = useState(true);
   const [createRestoOpen, setCreateRestoOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [deletingRestaurantId, setDeletingRestaurantId] = useState<string | null>(null);
   const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
   const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
   const currentAdminSession = useMemo(
@@ -683,6 +685,44 @@ export default function AdminPage() {
     }
   }
 
+  async function deleteRestaurant(restaurantId: string) {
+    setDeletingRestaurantId(restaurantId);
+
+    try {
+      const linkedCollections = ["categories", "dishes", "items", "orders", "users"];
+      const linkedSnapshots = await Promise.all(
+        linkedCollections.map((collectionName) =>
+          getDocs(query(collection(db, collectionName), where("restaurantId", "==", restaurantId)))
+        )
+      );
+
+      await Promise.all(
+        linkedSnapshots.flatMap((snapshot) =>
+          snapshot.docs.map((docSnap) => deleteDoc(docSnap.ref))
+        )
+      );
+
+      await deleteDoc(doc(db, "restaurants", restaurantId));
+
+      setRestaurants((current) => current.filter((restaurant) => restaurant.id !== restaurantId));
+      toast.success("Restaurant supprimé définitivement");
+    } catch (error) {
+      console.error("Erreur suppression restaurant Firestore :", error);
+      toast.error(error instanceof Error ? error.message : "Erreur lors de la suppression");
+    } finally {
+      setDeletingRestaurantId(null);
+    }
+  }
+
+  async function handleDeleteRestaurant(restaurant: RestaurantRow) {
+    const confirmed = window.confirm(
+      `Êtes-vous sûr de vouloir supprimer définitivement le restaurant ${restaurant.name} ? Cette action est irréversible et supprimera toutes les données associées.`
+    );
+
+    if (!confirmed) return;
+    await deleteRestaurant(restaurant.id);
+  }
+
   const handleSignOut = useCallback(() => {
     clearWorkspaceSession("admin");
     void signOut({ callbackUrl: "/login" });
@@ -784,7 +824,7 @@ export default function AdminPage() {
                     <TableHead className="text-center">Plats</TableHead>
                     <TableHead className="text-center">Users</TableHead>
                     <TableHead className="text-center">Statut du compte</TableHead>
-                    <TableHead className="text-center hidden sm:table-cell">Menu</TableHead>
+                    <TableHead className="text-center hidden sm:table-cell">Actions</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -831,16 +871,32 @@ export default function AdminPage() {
                           </span>
                         </div>
                       </TableCell>
-                      <TableCell className="text-center hidden sm:table-cell">
-                        <Button
-                          variant="ghost"
-                          size="sm"
-                          className="h-7 px-2"
-                          onClick={() => window.open(`/menu/${r.slug}`, "_blank")}
-                        >
-                          <Eye className="w-3.5 h-3.5 mr-1" />
-                          Voir
-                        </Button>
+                      <TableCell className="hidden sm:table-cell">
+                        <div className="flex items-center justify-center gap-1">
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2"
+                            onClick={() => window.open(`/menu/${r.slug}`, "_blank")}
+                          >
+                            <Eye className="w-3.5 h-3.5 mr-1" />
+                            Voir
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 px-2 text-red-600 hover:bg-red-50 hover:text-red-700"
+                            onClick={() => handleDeleteRestaurant(r)}
+                            disabled={deletingRestaurantId === r.id}
+                            aria-label={`Supprimer définitivement ${r.name}`}
+                          >
+                            {deletingRestaurantId === r.id ? (
+                              <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                            ) : (
+                              <Trash2 className="w-3.5 h-3.5" />
+                            )}
+                          </Button>
+                        </div>
                       </TableCell>
                     </TableRow>
                   ))}

@@ -17,6 +17,7 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   collection,
+  deleteDoc,
   doc,
   getDocs,
   limit,
@@ -26,7 +27,7 @@ import {
   where,
   type QueryDocumentSnapshot,
 } from "firebase/firestore";
-import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw } from "lucide-react";
+import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw, Trash2 } from "lucide-react";
 
 type OrderStatus = "pending" | "ready" | "delivered";
 
@@ -161,6 +162,7 @@ export default function DashboardOrdersPage() {
   const [currentRestaurant, setCurrentRestaurant] = useState<RestaurantRef | null>(null);
   const [restaurantResolved, setRestaurantResolved] = useState(false);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [deletingOrderId, setDeletingOrderId] = useState<string | null>(null);
   const [lastSeenOrderId, setLastSeenOrderId] = useState<string | null>(null);
   const [newOrderNotice, setNewOrderNotice] = useState(false);
   const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
@@ -356,6 +358,30 @@ export default function DashboardOrdersPage() {
     }
   }
 
+  async function deleteOrder(orderId: string) {
+    setDeletingOrderId(orderId);
+
+    try {
+      await deleteDoc(doc(firestoreDb, "orders", orderId));
+      setOrders((current) => current.filter((order) => order.id !== orderId));
+      toast.success("Commande livree supprimee");
+    } catch (error) {
+      console.error("Erreur suppression commande livree:", error);
+      toast.error("Impossible de supprimer la commande");
+    } finally {
+      setDeletingOrderId(null);
+    }
+  }
+
+  async function handleDeleteDeliveredOrder(order: DashboardOrder) {
+    if (order.status !== "delivered") return;
+
+    const confirmed = window.confirm("Supprimer cette commande livree de l'ecran ?");
+    if (!confirmed) return;
+
+    await deleteOrder(order.id);
+  }
+
   const handleSignOut = useCallback(() => {
     clearWorkspaceSession("dashboard");
     void signOut({ callbackUrl: "/login" });
@@ -498,9 +524,24 @@ export default function DashboardOrdersPage() {
                       </Button>
                     )}
                     {column.id === "delivered" && (
-                      <div className="flex items-center justify-center gap-1 rounded-md bg-slate-50 p-2 text-xs font-medium text-slate-700">
-                        <Clock className="h-3.5 w-3.5" />
-                        Commande terminee
+                      <div className="flex items-center justify-between gap-2 rounded-md bg-slate-50 p-2 text-xs font-medium text-slate-700">
+                        <span className="flex items-center justify-center gap-1">
+                          <Clock className="h-3.5 w-3.5" />
+                          Commande terminee
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleDeleteDeliveredOrder(order)}
+                          disabled={deletingOrderId === order.id}
+                          className="inline-flex h-7 w-7 items-center justify-center rounded-full text-red-600 transition-colors hover:bg-red-50 hover:text-red-700 disabled:cursor-not-allowed disabled:opacity-50"
+                          aria-label={`Supprimer la commande livree de la table ${order.tableNumber}`}
+                        >
+                          {deletingOrderId === order.id ? (
+                            <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+                          ) : (
+                            <Trash2 className="h-3.5 w-3.5" />
+                          )}
+                        </button>
                       </div>
                     )}
                   </article>
