@@ -1703,11 +1703,9 @@ export default function DashboardPage() {
                           </div>
                         ) : item.videoUrl ? (
                           <div className="flex-shrink-0 w-12 h-12 rounded-lg overflow-hidden bg-muted">
-                            <video
-                              src={item.videoUrl}
-                              muted
-                              playsInline
-                              preload="metadata"
+                            <img
+                              src={item.videoUrl.replace(/\.[^/.]+$/, ".jpg")}
+                              alt={`Aperçu vidéo de ${item.nameFr}`}
                               className={`w-full h-full rounded-lg object-cover ${!item.isAvailable ? "grayscale opacity-50" : ""}`}
                             />
                           </div>
