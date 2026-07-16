@@ -294,12 +294,14 @@ function MenuItemCard({
   labels,
   brandColor,
   onSelect,
+  onOpenVideo,
 }: {
   item: MenuItem;
   lang: Lang;
   labels: typeof LABELS.fr;
   brandColor: string;
   onSelect: (item: MenuItem) => void;
+  onOpenVideo: (item: MenuItem) => void;
 }) {
   const unavailable = !item.isAvailable;
   const hasVideo = !!item.videoUrl;
@@ -346,22 +348,31 @@ function MenuItemCard({
           ) : (
             <video
               src={item.videoUrl!}
-              controls
               muted
               loop
               playsInline
               autoPlay
               preload="metadata"
-              className={`w-full h-auto rounded-lg object-cover ${unavailable ? "grayscale" : ""}`}
+              className={`w-full h-full rounded-lg object-cover ${unavailable ? "grayscale" : ""}`}
             />
           )}
           {/* Icône Play si vidéo disponible */}
           {hasVideo && !unavailable && (
-            <div className="absolute bottom-1.5 right-1.5 w-7 h-7 rounded-full bg-black/60 backdrop-blur-sm flex items-center justify-center shadow-lg">
-              <svg className="w-3.5 h-3.5 text-white ml-0.5" fill="currentColor" viewBox="0 0 24 24">
-                <path d="M8 5v14l11-7z" />
-              </svg>
-            </div>
+            <button
+              type="button"
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenVideo(item);
+              }}
+              className="absolute inset-0 z-10 flex items-end justify-end p-1.5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-white"
+              aria-label={`Lire la vidéo de ${name} en plein écran`}
+            >
+              <span className="flex h-7 w-7 items-center justify-center rounded-full bg-black/60 shadow-lg backdrop-blur-sm">
+                <svg className="ml-0.5 h-3.5 w-3.5 text-white" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M8 5v14l11-7z" />
+                </svg>
+              </span>
+            </button>
           )}
         </div>
       ) : (
@@ -429,6 +440,70 @@ function MenuItemCard({
         </div>
       </div>
     </article>
+  );
+}
+
+function FullscreenVideoModal({
+  item,
+  lang,
+  onClose,
+}: {
+  item: MenuItem | null;
+  lang: Lang;
+  onClose: () => void;
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    if (!item?.videoUrl) return;
+
+    const previousOverflow = document.body.style.overflow;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", handleKeyDown);
+    videoRef.current?.play().catch(() => undefined);
+
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [item, onClose]);
+
+  if (!item?.videoUrl) return null;
+
+  const name = localItemName(item, lang);
+
+  return (
+    <div
+      className="fixed inset-0 z-[60] flex h-screen w-screen items-center justify-center bg-black"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`Vidéo de ${name}`}
+      onClick={onClose}
+    >
+      <video
+        ref={videoRef}
+        src={item.videoUrl}
+        controls
+        autoPlay
+        playsInline
+        preload="metadata"
+        poster={item.imageUrl || undefined}
+        className="h-full max-h-screen w-full max-w-screen object-contain"
+        onClick={(event) => event.stopPropagation()}
+      />
+      <button
+        type="button"
+        onClick={onClose}
+        className="absolute right-4 top-4 z-10 flex h-12 w-12 items-center justify-center rounded-full bg-white/95 text-2xl font-bold leading-none text-black shadow-lg"
+        aria-label="Fermer la vidéo"
+      >
+        x
+      </button>
+    </div>
   );
 }
 
@@ -502,9 +577,7 @@ function DishDetailModal({
               className="h-[58vh] w-full object-cover bg-black sm:max-h-[60vh]"
             />
           ) : (
-            <div className="flex h-[58vh] items-center justify-center bg-muted sm:h-80 [&>span]:hidden">
-              <span className="text-5xl">ðŸ½ï¸</span>
-            </div>
+            <div className="h-[58vh] bg-muted sm:h-80" aria-hidden="true" />
           )}
           <button
             type="button"
@@ -892,6 +965,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   const [lang, setLang] = useState<Lang>("fr");
   const labels = LABELS[lang];
   const [selectedItem, setSelectedItem] = useState<MenuItem | null>(null);
+  const [fullscreenVideoItem, setFullscreenVideoItem] = useState<MenuItem | null>(null);
   const [cart, setCart] = useState<CartItem[]>([]);
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const [submittingOrder, setSubmittingOrder] = useState(false);
@@ -1100,6 +1174,7 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
             labels={labels}
             brandColor={brandColor}
             onSelect={setSelectedItem}
+            onOpenVideo={setFullscreenVideoItem}
           />
         ))}
 
@@ -1141,6 +1216,11 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
         brandColor={brandColor}
         onAddToCart={handleAddToCart}
         onClose={() => setSelectedItem(null)}
+      />
+      <FullscreenVideoModal
+        item={fullscreenVideoItem}
+        lang={lang}
+        onClose={() => setFullscreenVideoItem(null)}
       />
       <CartBar
         cart={cart}
