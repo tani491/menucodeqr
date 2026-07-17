@@ -4,7 +4,8 @@ import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { MenuData, MenuCategory, MenuItem, Lang } from "@/lib/menu-data";
 import { db as firestoreDb } from "@/lib/firebaseClient";
-import { addDoc, collection, doc, onSnapshot } from "firebase/firestore";
+import { addDoc, collection, doc, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { toast } from "sonner";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
 
@@ -122,6 +123,17 @@ function localItemDesc(item: MenuItem, lang: Lang) {
   return item.descriptionFr || item.descriptionEn || null;
 }
 
+function optimizedCloudinaryImageUrl(url: string | null | undefined) {
+  if (!url || !url.includes("res.cloudinary.com") || !url.includes("/upload/")) {
+    return url || "";
+  }
+
+  const [prefix, rest] = url.split("/upload/");
+  if (!rest || (rest.includes("f_auto") && rest.includes("q_auto"))) return url;
+
+  return `${prefix}/upload/f_auto,q_auto,w_500/${rest}`;
+}
+
 // ─── LanguageToggle ─────────────────────────────────────────────────────────
 
 function LanguageToggle({
@@ -171,7 +183,7 @@ function RestaurantHeader({
       {restaurant.bannerUrl && (
         <div className="relative h-48 sm:h-56 md:h-64 w-full overflow-hidden">
           <img
-            src={restaurant.bannerUrl}
+            src={optimizedCloudinaryImageUrl(restaurant.bannerUrl)}
             alt={`Bannière de ${restaurant.name}`}
             loading="lazy"
             decoding="async"
@@ -197,7 +209,7 @@ function RestaurantHeader({
               }`}
             >
               <img
-                src={restaurant.logoUrl}
+                src={optimizedCloudinaryImageUrl(restaurant.logoUrl)}
                 alt={`Logo de ${restaurant.name}`}
                 loading="lazy"
                 decoding="async"
@@ -336,7 +348,7 @@ function MenuItemCard({
         <div className="relative flex-shrink-0 w-24 h-24 sm:w-28 sm:h-28 rounded-lg overflow-hidden">
           {item.imageUrl ? (
             <img
-              src={item.imageUrl}
+              src={optimizedCloudinaryImageUrl(item.imageUrl)}
               alt={name}
               loading="lazy"
               decoding="async"
@@ -491,7 +503,7 @@ function FullscreenVideoModal({
         autoPlay
         playsInline
         preload="metadata"
-        poster={item.imageUrl || undefined}
+        poster={optimizedCloudinaryImageUrl(item.imageUrl) || undefined}
         className="h-full max-h-screen w-full max-w-screen object-contain"
         onClick={(event) => event.stopPropagation()}
       />
@@ -523,6 +535,7 @@ function DishDetailModal({
   onClose: () => void;
 }) {
   const [quantity, setQuantity] = useState(1);
+  const [addingToCart, setAddingToCart] = useState(false);
 
   useEffect(() => {
     if (!item) return;
@@ -536,7 +549,10 @@ function DishDetailModal({
   }, [item, onClose]);
 
   useEffect(() => {
-    if (item) setQuantity(1);
+    if (item) {
+      setQuantity(1);
+      setAddingToCart(false);
+    }
   }, [item]);
 
   if (!item) return null;
@@ -566,11 +582,11 @@ function DishDetailModal({
               playsInline
               autoPlay
               className="w-full h-auto rounded-lg"
-              poster={item.imageUrl || undefined}
+              poster={optimizedCloudinaryImageUrl(item.imageUrl) || undefined}
             />
           ) : item.imageUrl ? (
             <img
-              src={item.imageUrl}
+              src={optimizedCloudinaryImageUrl(item.imageUrl)}
               alt={name}
               loading="lazy"
               decoding="async"
@@ -631,13 +647,15 @@ function DishDetailModal({
               type="button"
               className="h-11 flex-1 rounded-full px-4 text-sm font-semibold text-white shadow-sm active:scale-[0.99] disabled:opacity-60"
               style={{ backgroundColor: brandColor }}
-              disabled={!item.isAvailable}
+              disabled={!item.isAvailable || addingToCart}
               onClick={() => {
+                if (addingToCart || !item.isAvailable) return;
+                setAddingToCart(true);
                 onAddToCart(item, quantity);
                 onClose();
               }}
             >
-              Ajouter au panier
+              {addingToCart ? "Ajout..." : "Ajouter au panier"}
             </button>
           </div>
         </div>
@@ -730,10 +748,12 @@ function LoadMoreButton({
 function CartBar({
   cart,
   brandColor,
+  disabled = false,
   onCheckout,
 }: {
   cart: CartItem[];
   brandColor: string;
+  disabled?: boolean;
   onCheckout: () => void;
 }) {
   if (cart.length === 0) return null;
@@ -753,7 +773,8 @@ function CartBar({
         <button
           type="button"
           onClick={onCheckout}
-          className="h-11 rounded-full px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.99]"
+          disabled={disabled}
+          className="h-11 rounded-full px-5 text-sm font-semibold text-white shadow-sm active:scale-[0.99] disabled:opacity-60 disabled:cursor-not-allowed"
           style={{ backgroundColor: brandColor }}
         >
           Passer la commande
@@ -826,6 +847,7 @@ function CheckoutDialog({
           className="space-y-4"
           onSubmit={(event) => {
             event.preventDefault();
+            if (submitting) return;
             onSubmit({ customerName, customerPhone, notes, tableNumber: tableInput.trim() });
           }}
         >
@@ -903,6 +925,47 @@ function CheckoutDialog({
   );
 }
 
+function OrderSuccessModal({
+  total,
+  brandColor,
+  onOk,
+}: {
+  total: number | null;
+  brandColor: string;
+  onOk: () => void;
+}) {
+  if (total === null) return null;
+
+  return (
+    <div className="fixed inset-0 z-[55] flex items-center justify-center bg-black/60 p-4">
+      <div
+        className="w-full max-w-md rounded-2xl bg-white p-6 text-center shadow-2xl"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="order-success-title"
+      >
+        <h2 id="order-success-title" className="text-2xl font-black text-black">
+          Félicitations !
+        </h2>
+        <p className="mt-4 text-sm leading-relaxed text-muted-foreground">
+          Votre commande a bien été enregistrée pour un montant total de{" "}
+          <span className="font-bold text-black">{total.toLocaleString("fr-FR")} FCFA</span>.
+          Veuillez vous rendre à la caisse pour effectuer le règlement afin que la cuisine
+          lance votre préparation.
+        </p>
+        <button
+          type="button"
+          onClick={onOk}
+          className="mt-6 h-12 w-full rounded-full text-base font-bold text-white shadow-sm active:scale-[0.99]"
+          style={{ backgroundColor: brandColor }}
+        >
+          OK
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function OrderStatusPanel({
   order,
   brandColor,
@@ -971,6 +1034,13 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   const [submittingOrder, setSubmittingOrder] = useState(false);
   const [activeOrder, setActiveOrder] = useState<PublicOrder | null>(null);
   const [activeOrderId, setActiveOrderId] = useState<string | null>(null);
+  const [successOrderTotal, setSuccessOrderTotal] = useState<number | null>(null);
+  const orderSubmitLockRef = useRef(false);
+  const orderStatusRef = useRef<HTMLDivElement>(null);
+  const activeOrderUnsubscribeRef = useRef<Unsubscribe | null>(null);
+  const [orderTrackingEnabled, setOrderTrackingEnabled] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible"
+  );
 
   // État de la catégorie active — null = « Tout »
   const [activeCategoryId, setActiveCategoryId] = useState<string | null>(null);
@@ -986,6 +1056,30 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
 
   // Référence pour le scroll infini
   const sentinelRef = useRef<HTMLDivElement>(null);
+  const stopActiveOrderListener = useCallback(() => {
+    activeOrderUnsubscribeRef.current?.();
+    activeOrderUnsubscribeRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return stopActiveOrderListener;
+
+    const syncVisibility = () => {
+      const visible = document.visibilityState === "visible";
+      setOrderTrackingEnabled(visible);
+      if (!visible) stopActiveOrderListener();
+    };
+
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    window.addEventListener("pagehide", stopActiveOrderListener);
+
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      window.removeEventListener("pagehide", stopActiveOrderListener);
+      stopActiveOrderListener();
+    };
+  }, [stopActiveOrderListener]);
 
   // Handle catégorie click — reset la pagination dans le handler, pas dans un useEffect
   const handleCategorySelect = useCallback((id: string) => {
@@ -1005,6 +1099,14 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
       setIsLoadingMore(false);
     });
   }, [remainingItems, isLoadingMore]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(`qr-menu-data:${restaurant.slug}`, JSON.stringify(data));
+    } catch {
+      // Le cache navigateur peut etre indisponible en navigation privee.
+    }
+  }, [data, restaurant.slug]);
 
   useEffect(() => {
     try {
@@ -1057,7 +1159,8 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     tableNumber: string;
   }) {
     const submittedTableNumber = form.tableNumber.trim();
-    if (cart.length === 0 || !submittedTableNumber) return;
+    if (cart.length === 0 || !submittedTableNumber || orderSubmitLockRef.current) return;
+    orderSubmitLockRef.current = true;
     setSubmittingOrder(true);
     try {
       const now = new Date().toISOString();
@@ -1097,24 +1200,47 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
       window.localStorage.removeItem(cartStorageKey);
       window.localStorage.setItem(orderStorageKey, orderRef.id);
       setCheckoutOpen(false);
+      setSuccessOrderTotal(totalPrice);
     } catch (error) {
       console.error("Erreur creation commande Firestore:", error);
-      alert("Impossible de creer la commande");
+      toast.error("Connexion instable, commande non confirmee.");
     } finally {
+      orderSubmitLockRef.current = false;
       setSubmittingOrder(false);
     }
   }
 
   useEffect(() => {
-    if (!activeOrderId) return;
+    stopActiveOrderListener();
+    if (!activeOrderId || !orderTrackingEnabled) return;
 
-    const unsubscribe = onSnapshot(doc(firestoreDb, "orders", activeOrderId), (snapshot) => {
-      if (!snapshot.exists()) return;
-      setActiveOrder(normalizePublicOrder(snapshot.id, snapshot.data() as Record<string, unknown>));
+    try {
+      activeOrderUnsubscribeRef.current = onSnapshot(
+        doc(firestoreDb, "orders", activeOrderId),
+        (snapshot) => {
+          if (!snapshot.exists()) return;
+          setActiveOrder(normalizePublicOrder(snapshot.id, snapshot.data() as Record<string, unknown>));
+        },
+        (error) => {
+          console.error("Erreur suivi commande Firestore:", error);
+          toast.error("Connexion instable, suivi en temps reel interrompu.");
+          stopActiveOrderListener();
+        }
+      );
+    } catch (error) {
+      console.error("Erreur abonnement suivi commande:", error);
+      toast.error("Connexion instable, nouvelle tentative a la reconnexion.");
+    }
+
+    return stopActiveOrderListener;
+  }, [activeOrderId, orderTrackingEnabled, stopActiveOrderListener]);
+
+  const handleSuccessOk = useCallback(() => {
+    setSuccessOrderTotal(null);
+    requestAnimationFrame(() => {
+      orderStatusRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
     });
-
-    return () => unsubscribe();
-  }, [activeOrderId]);
+  }, []);
 
   // Intersection Observer pour le scroll infini
   useEffect(() => {
@@ -1208,7 +1334,9 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
         )}
       </main>
 
-      <OrderStatusPanel order={activeOrder} brandColor={brandColor} />
+      <div id="order-tracking" ref={orderStatusRef} className="scroll-mt-20">
+        <OrderStatusPanel order={activeOrder} brandColor={brandColor} />
+      </div>
 
       <DishDetailModal
         item={selectedItem}
@@ -1225,7 +1353,11 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
       <CartBar
         cart={cart}
         brandColor={brandColor}
-        onCheckout={() => setCheckoutOpen(true)}
+        disabled={checkoutOpen || submittingOrder}
+        onCheckout={() => {
+          if (checkoutOpen || submittingOrder) return;
+          setCheckoutOpen(true);
+        }}
       />
       <CheckoutDialog
         open={checkoutOpen}
@@ -1235,6 +1367,11 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
         submitting={submittingOrder}
         onClose={() => setCheckoutOpen(false)}
         onSubmit={handleSubmitOrder}
+      />
+      <OrderSuccessModal
+        total={successOrderTotal}
+        brandColor={brandColor}
+        onOk={handleSuccessOk}
       />
     </div>
   );

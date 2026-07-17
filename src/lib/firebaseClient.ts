@@ -1,6 +1,12 @@
 import { initializeApp, getApps, getApp } from "firebase/app";
 import { getAuth } from "firebase/auth";
-import { getFirestore, initializeFirestore, type Firestore } from "firebase/firestore";
+import {
+  getFirestore,
+  initializeFirestore,
+  persistentLocalCache,
+  persistentMultipleTabManager,
+  type Firestore,
+} from "firebase/firestore";
 import { firebaseConfig, getFirebasePublicConfig } from "./firebaseConfig";
 
 let cachedFirestore: Firestore | null = null;
@@ -13,6 +19,14 @@ function getDashboardFirestore() {
   try {
     cachedFirestore = initializeFirestore(app, {
       experimentalAutoDetectLongPolling: true,
+      ...(typeof window !== "undefined"
+        ? {
+            // IndexedDB persistence, equivalent to enableIndexedDbPersistence with multi-tab support.
+            localCache: persistentLocalCache({
+              tabManager: persistentMultipleTabManager(),
+            }),
+          }
+        : {}),
     });
   } catch {
     cachedFirestore = getFirestore(app);

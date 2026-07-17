@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
@@ -17,15 +17,15 @@ import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import {
   collection,
-  deleteDoc,
   doc,
   getDocs,
   limit,
   onSnapshot,
   query,
-  updateDoc,
+  runTransaction,
   where,
   type QueryDocumentSnapshot,
+  type Unsubscribe,
 } from "firebase/firestore";
 import { ArrowLeft, Bell, ChefHat, Clock, LogOut, RefreshCw, Trash2 } from "lucide-react";
 
@@ -167,6 +167,10 @@ export default function DashboardOrdersPage() {
   const [newOrderNotice, setNewOrderNotice] = useState(false);
   const [tabSession, setTabSession] = useState<TabWorkspaceSession | null>(null);
   const [workspaceSessionChecked, setWorkspaceSessionChecked] = useState(false);
+  const [ordersListenerEnabled, setOrdersListenerEnabled] = useState(
+    () => typeof document === "undefined" || document.visibilityState === "visible"
+  );
+  const ordersUnsubscribeRef = useRef<Unsubscribe | null>(null);
   const currentDashboardSession = useMemo(
     () => workspaceSessionFromUser("dashboard", session?.user),
     [
@@ -178,6 +182,30 @@ export default function DashboardOrdersPage() {
     ]
   );
   const dashboardSession = currentDashboardSession || tabSession;
+  const stopOrdersListener = useCallback(() => {
+    ordersUnsubscribeRef.current?.();
+    ordersUnsubscribeRef.current = null;
+  }, []);
+
+  useEffect(() => {
+    if (typeof document === "undefined") return stopOrdersListener;
+
+    const syncVisibility = () => {
+      const visible = document.visibilityState === "visible";
+      setOrdersListenerEnabled(visible);
+      if (!visible) stopOrdersListener();
+    };
+
+    syncVisibility();
+    document.addEventListener("visibilitychange", syncVisibility);
+    window.addEventListener("pagehide", stopOrdersListener);
+
+    return () => {
+      document.removeEventListener("visibilitychange", syncVisibility);
+      window.removeEventListener("pagehide", stopOrdersListener);
+      stopOrdersListener();
+    };
+  }, [stopOrdersListener]);
 
   useEffect(() => {
     if (currentDashboardSession) {
@@ -245,6 +273,7 @@ export default function DashboardOrdersPage() {
       } catch (error) {
         console.error("Erreur chargement restaurant commandes:", error);
         if (!cancelled) {
+          toast.error("Connexion instable, impossible de charger le restaurant.");
           setCurrentRestaurant(null);
           setOrders([]);
           setRestaurantResolved(true);
@@ -261,14 +290,16 @@ export default function DashboardOrdersPage() {
   }, [dashboardSession?.id]);
 
   useEffect(() => {
-    if (!currentRestaurant?.id) {
+    if (!currentRestaurant?.id || !ordersListenerEnabled) {
+      stopOrdersListener();
       if (restaurantResolved) setLoading(false);
       return;
     }
 
     try {
       setLoading(true);
-      const unsubscribe = onSnapshot(
+      stopOrdersListener();
+      ordersUnsubscribeRef.current = onSnapshot(
         ordersQuery(currentRestaurant.id),
         (snapshot) => {
           setOrders(sortOrdersByDate(snapshot.docs.map(normalizeOrder)));
@@ -276,17 +307,21 @@ export default function DashboardOrdersPage() {
         },
         (error) => {
           console.error("Erreur ecouteur Firestore orders:", error);
+          toast.error("Connexion instable, ecoute temps reel interrompue.");
           setOrders([]);
           setLoading(false);
+          stopOrdersListener();
         }
       );
 
-      return () => unsubscribe();
+      return stopOrdersListener;
     } catch (error) {
       console.error("Erreur globale useEffect orders:", error);
+      toast.error("Connexion instable, nouvelle tentative a la reconnexion.");
       setLoading(false);
+      stopOrdersListener();
     }
-  }, [currentRestaurant, restaurantResolved]);
+  }, [currentRestaurant?.id, ordersListenerEnabled, restaurantResolved, stopOrdersListener]);
 
   const refreshOrders = useCallback(async () => {
     if (!currentRestaurant?.id) return;
@@ -297,6 +332,7 @@ export default function DashboardOrdersPage() {
       setOrders(sortOrdersByDate(snapshot.docs.map(normalizeOrder)));
     } catch (error) {
       console.error("Erreur actualisation commandes:", error);
+      toast.error("Connexion instable, actualisation impossible.");
     } finally {
       setLoading(false);
     }
@@ -343,15 +379,37 @@ export default function DashboardOrdersPage() {
 
     try {
       const now = new Date().toISOString();
-      await updateDoc(doc(firestoreDb, "orders", order.id), {
-        status: nextStatus,
-        statusUpdatedAt: now,
-        updatedAt: now,
+      await runTransaction(firestoreDb, async (transaction) => {
+        const orderRef = doc(firestoreDb, "orders", order.id);
+        const snapshot = await transaction.get(orderRef);
+
+        if (!snapshot.exists()) {
+          throw new Error("ORDER_NOT_FOUND");
+        }
+
+        const currentStatus = normalizeOrderStatus(snapshot.data().status);
+        if (currentStatus !== order.status) {
+          throw new Error("ORDER_STATUS_CHANGED");
+        }
+
+        if (ORDER_STATUS_NEXT[currentStatus] !== nextStatus) {
+          throw new Error("ORDER_INVALID_TRANSITION");
+        }
+
+        transaction.update(orderRef, {
+          status: nextStatus,
+          statusUpdatedAt: now,
+          updatedAt: now,
+        });
       });
       toast.success(nextStatus === "ready" ? "Commande marquee prete" : "Commande livree");
     } catch (error) {
       console.error("Erreur mise a jour statut commande:", error);
-      toast.error("Impossible de mettre a jour la commande");
+      toast.error(
+        error instanceof Error && error.message === "ORDER_STATUS_CHANGED"
+          ? "Commande deja modifiee par un autre appareil."
+          : "Connexion instable, statut non confirme."
+      );
       void refreshOrders();
     } finally {
       setUpdatingId(null);
@@ -362,12 +420,31 @@ export default function DashboardOrdersPage() {
     setDeletingOrderId(orderId);
 
     try {
-      await deleteDoc(doc(firestoreDb, "orders", orderId));
+      await runTransaction(firestoreDb, async (transaction) => {
+        const orderRef = doc(firestoreDb, "orders", orderId);
+        const snapshot = await transaction.get(orderRef);
+
+        if (!snapshot.exists()) {
+          throw new Error("ORDER_NOT_FOUND");
+        }
+
+        const currentStatus = normalizeOrderStatus(snapshot.data().status);
+        if (currentStatus !== "delivered") {
+          throw new Error("ORDER_NOT_DELIVERED");
+        }
+
+        transaction.delete(orderRef);
+      });
       setOrders((current) => current.filter((order) => order.id !== orderId));
       toast.success("Commande livree supprimee");
     } catch (error) {
       console.error("Erreur suppression commande livree:", error);
-      toast.error("Impossible de supprimer la commande");
+      toast.error(
+        error instanceof Error && error.message === "ORDER_NOT_DELIVERED"
+          ? "Commande modifiee ailleurs, suppression annulee."
+          : "Connexion instable, suppression non confirmee."
+      );
+      void refreshOrders();
     } finally {
       setDeletingOrderId(null);
     }
@@ -383,9 +460,10 @@ export default function DashboardOrdersPage() {
   }
 
   const handleSignOut = useCallback(() => {
+    stopOrdersListener();
     clearWorkspaceSession("dashboard");
     void signOut({ callbackUrl: "/login" });
-  }, []);
+  }, [stopOrdersListener]);
 
   if (((status === "loading" || !workspaceSessionChecked) && !dashboardSession) || loading) {
     return (

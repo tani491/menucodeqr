@@ -42,14 +42,11 @@ import {
 } from "@/components/ui/select";
 import { toast } from "sonner";
 import { addDoc, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
-import QRCode from "qrcode";
 import {
   Plus,
   Pencil,
   Trash2,
   LogOut,
-  QrCode,
-  Download,
   Loader2,
   ImageIcon,
   Video,
@@ -430,148 +427,6 @@ const compressAndToBase64 = (
     reader.onerror = (error) => reject(error);
   });
 };
-
-function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
-  const [qrPngUrl, setQrPngUrl] = useState<string | null>(null);
-  const [qrSvgUrl, setQrSvgUrl] = useState<string | null>(null);
-  const [tableNumber, setTableNumber] = useState("1");
-  const [loading, setLoading] = useState(false);
-
-  useEffect(() => {
-    setQrPngUrl((current) => {
-      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-      return null;
-    });
-    setQrSvgUrl((current) => {
-      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
-      return null;
-    });
-  }, [restaurantSlug, tableNumber]);
-
-  const generateQr = useCallback(async (format: "png" | "svg") => {
-    if (!restaurantSlug) {
-      toast.error("Slug restaurant introuvable");
-      return;
-    }
-
-    setLoading(true);
-    try {
-      const targetUrl = `${window.location.origin}/menu/${restaurantSlug}?table=${encodeURIComponent(tableNumber || "1")}`;
-
-      if (format === "png") {
-        const url = await QRCode.toDataURL(targetUrl, {
-          width: 1024,
-          margin: 2,
-          errorCorrectionLevel: "M",
-        });
-        setQrPngUrl(url);
-      } else {
-        const svg = await QRCode.toString(targetUrl, {
-          type: "svg",
-          margin: 2,
-          errorCorrectionLevel: "M",
-        });
-        const blob = new Blob([svg], { type: "image/svg+xml" });
-        const url = URL.createObjectURL(blob);
-        if (qrSvgUrl) URL.revokeObjectURL(qrSvgUrl);
-        setQrSvgUrl(url);
-      }
-    } catch {
-      toast.error("Erreur de génération du QR code");
-    } finally {
-      setLoading(false);
-    }
-  }, [qrSvgUrl, restaurantSlug, tableNumber]);
-
-  const download = useCallback((url: string, filename: string) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = filename;
-    a.click();
-  }, []);
-
-  return (
-    <div className="space-y-4">
-      <div className="w-full space-y-2 md:max-w-xs">
-        <Label htmlFor="qr-table-number">Numero de table</Label>
-        <Input
-          id="qr-table-number"
-          value={tableNumber}
-          onChange={(e) =>
-            setTableNumber(e.target.value.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 20) || "1")
-          }
-          disabled={loading}
-          className="w-full"
-        />
-      </div>
-      {/* Mobile : boutons empiles et tactiles. Desktop : disposition en ligne. */}
-      <div className="flex flex-col gap-3 md:flex-row md:flex-wrap md:items-center">
-        <Button
-          onClick={() => generateQr("png")}
-          disabled={loading}
-          variant="outline"
-          size="sm"
-          className="w-full md:w-auto"
-        >
-          <QrCode className="w-4 h-4 mr-1.5" />
-          {loading ? "Génération..." : "Générer QR PNG"}
-        </Button>
-        <Button
-          onClick={() => generateQr("svg")}
-          disabled={loading}
-          variant="outline"
-          size="sm"
-          className="w-full md:w-auto"
-        >
-          <QrCode className="w-4 h-4 mr-1.5" />
-          {loading ? "Génération..." : "Générer QR SVG"}
-        </Button>
-      </div>
-      {(qrPngUrl || qrSvgUrl) && (
-        <div className="flex flex-wrap gap-4">
-          {qrPngUrl && (
-            <div className="text-center">
-              <img
-                key={`png-${restaurantSlug || "restaurant"}-${tableNumber}-${qrPngUrl}`}
-                src={qrPngUrl}
-                alt="QR Code PNG"
-                className="w-40 h-40 rounded-lg border"
-              />
-              <p className="text-xs text-muted-foreground mt-1">PNG (1024px)</p>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={() => download(qrPngUrl, `qrcode-${restaurantSlug || "menu"}-table-${tableNumber}.png`)}
-                className="text-xs"
-              >
-                <Download className="w-3 h-3 mr-1" /> Télécharger
-              </Button>
-            </div>
-          )}
-          {qrSvgUrl && (
-            <div className="text-center">
-              <img
-                key={`svg-${restaurantSlug || "restaurant"}-${tableNumber}-${qrSvgUrl}`}
-                src={qrSvgUrl}
-                alt="QR Code SVG"
-                className="w-40 h-40 rounded-lg border bg-white"
-              />
-              <p className="text-xs text-muted-foreground mt-1">SVG (vectoriel)</p>
-              <Button
-                variant="link"
-                size="sm"
-                onClick={() => download(qrSvgUrl, `qrcode-${restaurantSlug || "menu"}-table-${tableNumber}.svg`)}
-                className="text-xs"
-              >
-                <Download className="w-3 h-3 mr-1" /> Télécharger
-              </Button>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  );
-}
 
 // ─── File Upload Field ──────────────────────────────────────────────────────
 
@@ -1613,14 +1468,6 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
-        {/* QR Code Section */}
-        <section>
-          <h2 className="font-semibold text-sm mb-3">QR Code du menu</h2>
-          <QrCodeSection restaurantSlug={data.restaurantSlug} />
-        </section>
-
-        <Separator />
-
         <RestaurantMediaSection
           restaurantId={data.restaurantId}
           restaurantDocId={data.restaurantDocId}

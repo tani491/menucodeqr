@@ -150,6 +150,7 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   const db = getMenuFirestoreDb();
   if (!db) return null;
 
+  try {
   const restaurantsSnapshot = await getDocs(
     query(collection(db, "restaurants"), where("slug", "==", slug), limit(1))
   );
@@ -247,6 +248,10 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   menuCache.set(slug, { data, timestamp: Date.now() });
 
   return data;
+  } catch (error) {
+    console.error("Erreur Firestore getMenuBySlug:", error);
+    return cached?.data ?? null;
+  }
 }
 
 // React cache() déduplique les appels au sein d'un même rendu serveur
@@ -266,9 +271,14 @@ export const getAllRestaurantSlugs = cache(async (): Promise<string[]> => {
   const db = getMenuFirestoreDb();
   if (!db) return [];
 
-  const restaurantsSnapshot = await getDocs(collection(db, "restaurants"));
+  try {
+    const restaurantsSnapshot = await getDocs(collection(db, "restaurants"));
 
-  return restaurantsSnapshot.docs
-    .map((restaurantDoc) => stringValue((restaurantDoc.data() as FirestoreRecord).slug))
-    .filter(Boolean);
+    return restaurantsSnapshot.docs
+      .map((restaurantDoc) => stringValue((restaurantDoc.data() as FirestoreRecord).slug))
+      .filter(Boolean);
+  } catch (error) {
+    console.error("Erreur Firestore getAllRestaurantSlugs:", error);
+    return [];
+  }
 });
