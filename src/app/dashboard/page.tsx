@@ -47,6 +47,8 @@ import {
   Pencil,
   Trash2,
   LogOut,
+  QrCode,
+  Download,
   Loader2,
   ImageIcon,
   Video,
@@ -59,6 +61,7 @@ import {
   ClipboardList,
   Menu,
 } from "lucide-react";
+import QRCode from "qrcode";
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -427,6 +430,177 @@ const compressAndToBase64 = (
     reader.onerror = (error) => reject(error);
   });
 };
+
+// ─── QR Code Section ────────────────────────────────────────────────────────
+
+function QrCodeSection({ restaurantSlug }: { restaurantSlug?: string | null }) {
+  const [qrPngUrl, setQrPngUrl] = useState<string | null>(null);
+  const [qrSvgUrl, setQrSvgUrl] = useState<string | null>(null);
+  const [loadingFormat, setLoadingFormat] = useState<"png" | "svg" | null>(null);
+  const productionOrigin = "https://menucodeqr.vercel.app";
+
+  useEffect(() => {
+    setQrPngUrl(null);
+    setQrSvgUrl((current) => {
+      if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+      return null;
+    });
+  }, [restaurantSlug]);
+
+  useEffect(() => {
+    return () => {
+      if (qrSvgUrl?.startsWith("blob:")) URL.revokeObjectURL(qrSvgUrl);
+    };
+  }, [qrSvgUrl]);
+
+  const getMenuUrl = useCallback(() => {
+    if (!restaurantSlug) return "";
+    const configuredOrigin = process.env.NEXT_PUBLIC_SITE_URL?.trim().replace(/\/$/, "");
+    const publicOrigin =
+      configuredOrigin && !configuredOrigin.includes("localhost")
+        ? configuredOrigin
+        : productionOrigin;
+
+    return `${publicOrigin}/menu/${restaurantSlug}`;
+  }, [productionOrigin, restaurantSlug]);
+
+  const generateQrCode = useCallback(
+    async (format: "png" | "svg") => {
+      if (!restaurantSlug) {
+        toast.error("Slug restaurant introuvable");
+        return;
+      }
+
+      const targetUrl = getMenuUrl();
+      setLoadingFormat(format);
+
+      try {
+        if (format === "png") {
+          const url = await QRCode.toDataURL(targetUrl, {
+            width: 1024,
+            margin: 2,
+            errorCorrectionLevel: "M",
+          });
+          setQrPngUrl(url);
+          return;
+        }
+
+        const svg = await QRCode.toString(targetUrl, {
+          type: "svg",
+          margin: 2,
+          errorCorrectionLevel: "M",
+        });
+        const blob = new Blob([svg], { type: "image/svg+xml" });
+        const url = URL.createObjectURL(blob);
+        setQrSvgUrl((current) => {
+          if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+          return url;
+        });
+      } catch {
+        toast.error("Erreur de génération du QR code");
+      } finally {
+        setLoadingFormat(null);
+      }
+    },
+    [getMenuUrl, restaurantSlug]
+  );
+
+  useEffect(() => {
+    if (!restaurantSlug) return;
+    void generateQrCode("png");
+  }, [generateQrCode, restaurantSlug]);
+
+  const downloadQRCode = useCallback((url: string, filename: string) => {
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+  }, []);
+
+  const previewQrUrl = qrSvgUrl || qrPngUrl;
+
+  return (
+    <section>
+      <div className="mb-3 flex items-center justify-between gap-3">
+        <div>
+          <h2 className="font-semibold text-sm">QR Code du menu</h2>
+          {restaurantSlug && (
+            <p className="mt-1 break-all text-xs text-muted-foreground">
+              {typeof window !== "undefined" ? getMenuUrl() : `/menu/${restaurantSlug}`}
+            </p>
+          )}
+        </div>
+        <QrCode className="h-5 w-5 shrink-0 text-muted-foreground" />
+      </div>
+
+      <div className="rounded-lg border bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start">
+          <div className="flex min-h-44 w-full items-center justify-center rounded-lg border border-dashed bg-muted/30 p-3 md:w-48">
+            {previewQrUrl ? (
+              <img src={previewQrUrl} alt="QR Code du menu" className="h-40 w-40 rounded bg-white" />
+            ) : (
+              <QrCode className="h-16 w-16 text-muted-foreground/40" />
+            )}
+          </div>
+
+          <div className="flex-1 space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap">
+              <Button
+                type="button"
+                onClick={() => generateQrCode("png")}
+                disabled={!restaurantSlug || loadingFormat !== null}
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <QrCode className="mr-1.5 h-4 w-4" />
+                {loadingFormat === "png" ? "Génération..." : "Générer PNG"}
+              </Button>
+              <Button
+                type="button"
+                onClick={() => generateQrCode("svg")}
+                disabled={!restaurantSlug || loadingFormat !== null}
+                variant="outline"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <QrCode className="mr-1.5 h-4 w-4" />
+                {loadingFormat === "svg" ? "Génération..." : "Générer SVG"}
+              </Button>
+            </div>
+
+            <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+              <Button
+                type="button"
+                onClick={() => qrPngUrl && downloadQRCode(qrPngUrl, `qrcode-${restaurantSlug || "menu"}.png`)}
+                disabled={!qrPngUrl}
+                variant="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <Download className="mr-1.5 h-4 w-4" />
+                Télécharger PNG
+              </Button>
+              <Button
+                type="button"
+                onClick={() => qrSvgUrl && downloadQRCode(qrSvgUrl, `qrcode-${restaurantSlug || "menu"}.svg`)}
+                disabled={!qrSvgUrl}
+                variant="secondary"
+                size="sm"
+                className="w-full sm:w-auto"
+              >
+                <Download className="mr-1.5 h-4 w-4" />
+                Télécharger SVG
+              </Button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 // ─── File Upload Field ──────────────────────────────────────────────────────
 
@@ -1468,6 +1642,10 @@ export default function DashboardPage() {
       </header>
 
       <main className="max-w-4xl mx-auto px-4 py-6 space-y-8">
+        <QrCodeSection restaurantSlug={data.restaurantSlug} />
+
+        <Separator />
+
         <RestaurantMediaSection
           restaurantId={data.restaurantId}
           restaurantDocId={data.restaurantDocId}
