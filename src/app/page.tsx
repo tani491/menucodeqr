@@ -38,14 +38,15 @@ async function MenuPreview() {
   const destination = host ? `${protocol}://${host}/` : whatsappContactUrl;
   const qrImage = await QRCode.toDataURL(destination, { width: 160, margin: 2, errorCorrectionLevel: "M" });
   const dishes = [
-    { name: "Pastel à la viande", description: "Pastels dorés, viande épicée et sauce tomate.", price: "2 000 FCFA" },
-    { name: "Pastel au poisson", description: "Une entrée croustillante à partager.", price: "2 500 FCFA" },
-    { name: "Pastel aux légumes", description: "Légumes de saison et herbes fraîches.", price: "1 500 FCFA" },
+    // Unsplash: Ana Beatriz (7ntwSjz8HZE), Daniel Lloyd Blunk-Fernández (D4GVb2b3MNo), Joshua Hoehne (broMfoJ0Emg).
+    { name: "Pastel à la viande", description: "Beignets dorés et sauce tomate.", price: "2 000 FCFA", image: "https://images.unsplash.com/photo-1769254870299-338bfd99aabd?auto=format&fit=crop&w=200&q=80" },
+    { name: "Salade de Mangue et Crevettes", description: "Mangue fraîche, crevettes et herbes.", price: "3 500 FCFA", image: "https://images.unsplash.com/photo-1600703090131-9639c5955cbd?auto=format&fit=crop&w=200&q=80" },
+    { name: "Nems au Poulet Yassa", description: "Rouleaux croustillants au poulet.", price: "2 500 FCFA", image: "https://images.unsplash.com/photo-1515022376298-7333f33e704b?auto=format&fit=crop&w=200&q=80" },
   ];
   return (
     <figure className="mx-auto min-w-0 w-full max-w-lg">
-      <div className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)] items-center gap-3 px-1 py-5 sm:gap-5 sm:px-3 sm:py-7">
-        <div className="min-w-0 rotate-[-4deg] border border-[#E5E7EB] bg-[#FCFBF8] px-3 py-5 shadow-[0_12px_35px_-20px_rgba(17,24,39,0.25)] sm:px-5 sm:py-7">
+      <div className="grid grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] items-center gap-3 px-1 py-5 sm:gap-5 sm:px-3 sm:py-7">
+        <div className="min-w-0 rotate-[-4deg] border border-[#DDD9D0] bg-[#FCFBF8] bg-[radial-gradient(rgba(120,110,90,0.06)_0.5px,transparent_0.5px)] bg-size-[3px_3px] px-3 py-5 shadow-[0_20px_30px_-10px_rgba(0,0,0,0.25)] sm:px-5 sm:py-7">
           <p className="text-center text-[8px] uppercase tracking-[0.18em] text-[#6B7280] sm:text-[9px]">La Playa</p>
           <p className="mt-2 text-center font-serif text-2xl tracking-tight sm:text-3xl">La carte</p>
           <div className="mt-4 overflow-hidden rounded-sm border border-[#E5E7EB] p-1">
@@ -62,34 +63,35 @@ async function MenuPreview() {
           </a>
         </div>
 
-        <div className="relative min-w-0 rotate-[4deg] rounded-[1.8rem] border border-[#6B7280] bg-[#111827] p-[5px] shadow-[0_18px_40px_-22px_rgba(17,24,39,0.4)] sm:rounded-[2.1rem] sm:p-[7px]">
+        <div data-menu-phone className="@container relative aspect-[9/19.5] w-full max-w-[200px] min-w-0 justify-self-end rotate-[4deg] rounded-[1.8rem] border border-[#6B7280] bg-[#111827] p-[5px] shadow-[0_18px_40px_-22px_rgba(17,24,39,0.4)] sm:rounded-[2.1rem] sm:p-[7px]">
           <div className="absolute -left-[2px] top-16 h-7 w-[2px] rounded-l bg-[#6B7280]" aria-hidden="true" />
           <div className="absolute -right-[2px] top-24 h-9 w-[2px] rounded-r bg-[#6B7280]" aria-hidden="true" />
-          <div className="relative overflow-hidden rounded-[1.5rem] bg-[#F9FAFB] sm:rounded-[1.7rem]">
-            <div className="relative flex h-7 items-center justify-between bg-white px-3 text-[7px] font-semibold sm:h-8 sm:text-[8px]" aria-hidden="true">
-              <span>9:41</span><span className="absolute left-1/2 top-1.5 h-3 w-12 -translate-x-1/2 rounded-full bg-[#111827] sm:h-3.5 sm:w-14"><span className="absolute right-1.5 top-1 h-1 w-1 rounded-full bg-[#374151]" /></span><span>▮▮ ▰</span>
+          <div className="relative flex h-full min-h-0 flex-col overflow-hidden rounded-[1.5rem] bg-[#F9FAFB] sm:rounded-[1.7rem]">
+            <div className="relative flex h-[6%] shrink-0 items-center justify-between bg-white px-[6cqw] text-[3.5cqw] font-semibold" aria-hidden="true">
+              <span>9:41</span><span className="absolute left-1/2 top-[2cqw] h-[6cqw] w-[30cqw] -translate-x-1/2 rounded-full bg-[#111827]"><span className="absolute right-[4cqw] top-[2cqw] h-[2cqw] w-[2cqw] rounded-full bg-[#374151]" /></span><span>▮▮ ▰</span>
             </div>
-            <div className="relative">
-              <Image src="/menu-preview-pastels.webp" alt="" width={960} height={640} sizes="(max-width: 640px) 45vw, 240px" className="h-16 w-full object-cover sm:h-20" />
+            <div className="relative h-[18%] shrink-0">
+              <Image src="/menu-preview-pastels.webp" alt="" width={960} height={640} sizes="(max-width: 640px) 45vw, 240px" className="h-full w-full object-cover" />
               <div className="absolute inset-0 bg-gradient-to-t from-[#111827]/40 to-transparent" />
-              <div className="absolute -bottom-4 left-2 flex h-9 w-9 items-center justify-center rounded-lg border-2 border-white bg-[#EFF6FF] font-serif text-sm text-[#2563EB] shadow-sm sm:h-11 sm:w-11 sm:text-base" aria-label="Logo du restaurant La Playa">LP</div>
+              <div className="absolute bottom-[-8cqw] left-[5cqw] flex h-[22cqw] w-[22cqw] items-center justify-center rounded-lg border-2 border-white bg-[#EFF6FF] font-serif text-[7cqw] text-[#2563EB] shadow-sm" aria-label="Logo du restaurant La Playa">LP</div>
             </div>
-            <div className="border-b border-[#E5E7EB] bg-white px-2 pb-3 pt-6 sm:px-3">
-              <div className="flex items-center justify-between gap-1"><p className="text-[11px] font-bold text-[#2563EB] sm:text-sm">la playa</p><span className="whitespace-nowrap rounded-full border border-[#E5E7EB] px-1.5 py-1 text-[6px] sm:text-[8px]"><strong className="text-[#2563EB]">FR</strong><span className="px-1 text-[#9CA3AF]">|</span>EN</span></div>
-              <p className="mt-1 text-[7px] text-[#6B7280] sm:text-[8px]">Votre menu, à votre table.</p>
+            <div className="flex h-[17%] shrink-0 flex-col justify-end border-b border-[#E5E7EB] bg-white px-[5cqw] pb-[3cqw]">
+              <div className="flex items-center justify-between gap-1"><p className="text-[7cqw] font-bold text-[#2563EB]">la playa</p><span className="whitespace-nowrap rounded-full border border-[#E5E7EB] px-[3cqw] py-[2cqw] text-[3.5cqw]"><strong className="text-[#2563EB]">FR</strong><span className="px-1 text-[#9CA3AF]">|</span>EN</span></div>
+              <p className="mt-[1cqw] text-[3.5cqw] text-[#6B7280]">Votre menu, à votre table.</p>
             </div>
-            <div className="flex flex-wrap gap-1 border-b border-[#E5E7EB] bg-white px-2 py-2 sm:px-3">
-              {["Entrées 3", "Plats 3", "Desserts 3", "Boissons"].map((category, index) => <span key={category} className={`rounded-full border px-1.5 py-1 text-[6px] font-medium sm:px-2 sm:text-[7px] ${index === 0 ? "border-[#2563EB] bg-[#2563EB] text-white" : "border-[#E5E7EB] text-[#4B5563]"}`}>{category}</span>)}
+            <div className="flex shrink-0 flex-wrap gap-[2cqw] border-b border-[#E5E7EB] bg-white px-[4cqw] py-[2cqw]">
+              {["Entrées 3", "Plats 3", "Desserts 3", "Boissons"].map((category, index) => <span key={category} className={`rounded-full border px-[2.5cqw] py-[2cqw] text-[3.5cqw] font-medium ${index === 0 ? "border-[#2563EB] bg-[#2563EB] text-white" : "border-[#E5E7EB] text-[#4B5563]"}`}>{category}</span>)}
             </div>
-            <div className="space-y-1.5 px-1.5 pb-3 pt-2 sm:space-y-2 sm:px-2 sm:pb-4">
-              <p className="px-0.5 text-[8px] font-semibold sm:text-[10px]">Entrées <span className="font-normal text-[#6B7280]">· 3 plats</span></p>
-              {dishes.map((dish) => <div key={dish.name} className="flex items-start gap-1.5 rounded-lg border border-[#E5E7EB] bg-white p-1.5 sm:gap-2 sm:p-2">
-                <Image src="/menu-preview-pastels.webp" alt={dish.name} width={960} height={640} sizes="64px" className="h-10 w-9 shrink-0 rounded-md object-cover sm:h-14 sm:w-12" />
-                <div className="min-w-0"><p className="text-[7px] font-bold leading-[1.3] sm:text-[9px]">{dish.name}</p><p className="mt-0.5 text-[6px] leading-[1.4] text-[#6B7280] sm:text-[7px]">{dish.description}</p><p className="mt-1 text-[7px] font-bold text-[#2563EB] sm:text-[9px]">{dish.price}</p></div>
-              </div>)}
-              <p className="pt-1 text-center text-[6px] text-[#6B7280] sm:text-[7px]">Aperçu du menu digital</p>
+            <div className="flex min-h-0 flex-1 flex-col gap-1 px-1.5 pb-1 pt-1 sm:px-2">
+              <p className="px-0.5 text-[4.5cqw] font-semibold">Entrées <span className="font-normal text-[#6B7280]">· 3 plats</span></p>
+              <div className="grid min-h-0 flex-1 grid-rows-3 gap-1">
+                {dishes.map((dish) => <div key={dish.name} data-preview-dish className="flex min-h-0 items-center gap-[2cqw] rounded-md border border-[#E5E7EB] bg-white p-[2cqw]">
+                  <Image src={dish.image} alt={dish.name} width={64} height={64} unoptimized className="h-full w-[28%] shrink-0 rounded-md object-cover" />
+                  <div className="min-w-0"><p className="text-[4.5cqw] font-bold leading-[1.2]">{dish.name}</p><p className="mt-[1cqw] line-clamp-1 text-[3.5cqw] leading-[1.4] text-[#6B7280]">{dish.description}</p><p className="mt-[1cqw] text-[4.5cqw] font-bold text-[#2563EB]">{dish.price}</p></div>
+                </div>)}
+              </div>
             </div>
-            <div className="mx-auto mb-2 h-1 w-12 rounded-full bg-[#111827]/70" aria-hidden="true" />
+            <div className="mx-auto mb-1 mt-1 h-1 w-12 shrink-0 rounded-full bg-[#111827]/70" aria-hidden="true" />
           </div>
         </div>
       </div>

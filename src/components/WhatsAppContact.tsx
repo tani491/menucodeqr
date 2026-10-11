@@ -1,3 +1,5 @@
+import WhatsAppVisibility from "@/components/WhatsAppVisibility";
+
 export const whatsappContactUrl = `https://wa.me/221773615944?text=${encodeURIComponent("Bonjour, je souhaite une démonstration de MenuLive pour mon restaurant.")}`;
 
 export function WhatsAppIcon({ className }: { className?: string }) {
@@ -8,8 +10,8 @@ export function WhatsAppIcon({ className }: { className?: string }) {
 }
 
 export default function WhatsAppContact() {
-  return <a href={whatsappContactUrl} target="_blank" rel="noopener noreferrer" aria-label="Contactez MenuLive sur WhatsApp" className="fixed bottom-[20px] right-[20px] z-50 inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-[#0F5132] p-3 text-white shadow-md transition-colors hover:bg-[#123F2C] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F5132] sm:px-5">
+  return <WhatsAppVisibility><a href={whatsappContactUrl} target="_blank" rel="noopener noreferrer" aria-label="Contactez MenuLive sur WhatsApp" className="fixed bottom-[20px] right-[20px] z-50 inline-flex min-h-12 min-w-12 items-center justify-center gap-2 rounded-full bg-[#0F5132] p-3 text-white shadow-md transition-colors hover:bg-[#123F2C] focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-[#0F5132] sm:px-5">
     <WhatsAppIcon className="h-6 w-6" />
     <span className="hidden text-sm font-medium sm:inline">Contactez-nous</span>
-  </a>;
+  </a></WhatsAppVisibility>;
 }
