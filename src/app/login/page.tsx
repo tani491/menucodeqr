@@ -22,6 +22,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { Loader2 } from "lucide-react";
+import MarketingPanel from "@/components/MarketingPanel";
 
 function LoginForm() {
   const searchParams = useSearchParams();
@@ -155,10 +156,11 @@ function LoginForm() {
 
 export default function LoginPage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4 bg-background">
+    <div className="min-h-screen flex flex-col lg:flex-row gap-8 items-center justify-center p-4 lg:p-10 bg-background">
       <Suspense>
         <LoginForm />
       </Suspense>
+      <MarketingPanel />
     </div>
   );
 }

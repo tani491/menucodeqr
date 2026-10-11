@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
 import { useRouter } from "next/navigation";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -790,6 +791,9 @@ export default function AdminPage() {
 
         {/* Actions */}
         <div className="flex flex-wrap items-center gap-3">
+          <Button asChild variant="outline">
+            <Link href="/admin/marketing">Gestion Landing Page</Link>
+          </Button>
           <Button onClick={() => setCreateRestoOpen(true)}>
             <Plus className="w-4 h-4 mr-1.5" />
             Nouveau restaurant
