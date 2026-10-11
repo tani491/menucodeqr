@@ -3,8 +3,9 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useSearchParams } from "next/navigation";
 import type { MenuData, MenuCategory, MenuItem, Lang } from "@/lib/menu-data";
-import { db as firestoreDb } from "@/lib/firebaseClient";
-import { addDoc, collection, doc, onSnapshot, type Unsubscribe } from "firebase/firestore";
+import { orderInputSchema, sanitizeTableNumber } from "@/lib/validation";
+import { marketingRequest } from "@/lib/marketing";
+type Unsubscribe = () => void;
 import { toast } from "sonner";
 
 // ─── Constants ─────────────────────────────────────────────────────────────
@@ -74,7 +75,7 @@ function normalizePublicOrder(id: string, data: Record<string, unknown>): Public
 
   return {
     id,
-    tableNumber: typeof data.tableNumber === "string" ? data.tableNumber : "1",
+    tableNumber: sanitizeTableNumber(data.tableNumber) || "1",
     customerName: typeof data.customerName === "string" ? data.customerName : "Client",
     customerPhone: typeof data.customerPhone === "string" ? data.customerPhone : "",
     status: normalizeOrderStatus(data.status),
@@ -1020,8 +1021,9 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
   const { restaurant, categories, items: allItems } = data;
   const brandColor = restaurant.primaryColor || "#000000";
   const searchParams = useSearchParams();
-  const tableNumber = searchParams.get("table")?.trim() || "";
+  const tableNumber = sanitizeTableNumber(searchParams.get("table"));
   const cartStorageKey = `qr-cart:${restaurant.slug}:${tableNumber || "no-table"}`;
+  const [loadedCartKey, setLoadedCartKey] = useState<string | null>(null);
   const orderStorageKey = `qr-order:${restaurant.slug}:${tableNumber || "no-table"}`;
 
   // ─── Langue (état local, par défaut FR) ─────────────────────────────────
@@ -1110,20 +1112,22 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
 
   useEffect(() => {
     try {
-      const savedCart = window.localStorage.getItem(cartStorageKey);
+      const savedCart = window.sessionStorage.getItem(cartStorageKey);
       setCart(savedCart ? JSON.parse(savedCart) : []);
     } catch {
       setCart([]);
     }
+    setLoadedCartKey(cartStorageKey);
   }, [cartStorageKey]);
 
   useEffect(() => {
-    window.localStorage.setItem(cartStorageKey, JSON.stringify(cart));
-  }, [cart, cartStorageKey]);
+    if (loadedCartKey !== cartStorageKey) return;
+    try { window.sessionStorage.setItem(cartStorageKey, JSON.stringify(cart)); } catch { /* Cart stays usable without browser storage. */ }
+  }, [cart, cartStorageKey, loadedCartKey]);
 
   useEffect(() => {
     try {
-      setActiveOrderId(window.localStorage.getItem(orderStorageKey));
+      setActiveOrderId(window.sessionStorage.getItem(orderStorageKey));
     } catch {
       setActiveOrderId(null);
     }
@@ -1163,44 +1167,19 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     orderSubmitLockRef.current = true;
     setSubmittingOrder(true);
     try {
-      const now = new Date().toISOString();
-      const orderItems = cart.map((cartItem) => {
-        const menuItem = allItems.find((item) => item.id === cartItem.itemId);
-        const itemName = menuItem ? localItemName(menuItem, lang) : cartItem.name;
-
-        return {
-          id: cartItem.itemId,
-          name: itemName,
-          price: cartItem.price,
-          quantity: cartItem.quantity,
-        };
-      });
-      const totalPrice = orderItems.reduce(
-        (total, item) => total + item.price * item.quantity,
-        0
-      );
-      const orderPayload = {
-        restaurantId: restaurant.id,
-        tableNumber: submittedTableNumber,
-        items: orderItems,
-        status: "pending",
-        totalPrice,
-        createdAt: now,
-        restaurantSlug: restaurant.slug,
-        customerName: form.customerName.trim(),
-        customerPhone: form.customerPhone.trim(),
-        notes: form.notes.trim() || null,
-        updatedAt: now,
-      };
-      const orderRef = await addDoc(collection(firestoreDb, "orders"), orderPayload);
+      const input = orderInputSchema.parse({ slug: restaurant.slug, tableNumber: submittedTableNumber, customerName: form.customerName, customerPhone: form.customerPhone, notes: form.notes, items: cart.map(item => ({ itemId: item.itemId, quantity: item.quantity })) });
+      const orderRef = await marketingRequest<{ id: string; token: string; order: Record<string, unknown> }>("/api/menu-orders", { method: "POST", body: JSON.stringify(input) });
+      try { window.sessionStorage.setItem(`qr-order-token:${orderRef.id}`, orderRef.token); } catch { /* Tracking requires tab storage. */ }
 
       setActiveOrderId(orderRef.id);
-      setActiveOrder(normalizePublicOrder(orderRef.id, orderPayload));
+      setActiveOrder(normalizePublicOrder(orderRef.id, orderRef.order));
       setCart([]);
-      window.localStorage.removeItem(cartStorageKey);
-      window.localStorage.setItem(orderStorageKey, orderRef.id);
+      try {
+        window.sessionStorage.removeItem(cartStorageKey);
+        window.sessionStorage.setItem(orderStorageKey, orderRef.id);
+      } catch { /* A confirmed order must stay confirmed if storage is unavailable. */ }
       setCheckoutOpen(false);
-      setSuccessOrderTotal(totalPrice);
+      setSuccessOrderTotal(Number(orderRef.order.totalPrice));
     } catch (error) {
       console.error("Erreur creation commande Firestore:", error);
       toast.error("Connexion instable, commande non confirmee.");
@@ -1214,24 +1193,23 @@ export default function MenuPageClient({ data }: { data: MenuData }) {
     stopActiveOrderListener();
     if (!activeOrderId || !orderTrackingEnabled) return;
 
-    try {
-      activeOrderUnsubscribeRef.current = onSnapshot(
-        doc(firestoreDb, "orders", activeOrderId),
-        (snapshot) => {
-          if (!snapshot.exists()) return;
-          setActiveOrder(normalizePublicOrder(snapshot.id, snapshot.data() as Record<string, unknown>));
-        },
-        (error) => {
-          console.error("Erreur suivi commande Firestore:", error);
-          toast.error("Connexion instable, suivi en temps reel interrompu.");
-          stopActiveOrderListener();
-        }
-      );
-    } catch (error) {
-      console.error("Erreur abonnement suivi commande:", error);
-      toast.error("Connexion instable, nouvelle tentative a la reconnexion.");
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout>;
+    const controller = new AbortController();
+    async function refresh() {
+      try {
+        const token = window.sessionStorage.getItem(`qr-order-token:${activeOrderId}`);
+        if (!token) return;
+        const response = await fetch(`/api/menu-orders?id=${encodeURIComponent(activeOrderId!)}`, { cache: "no-store", headers: { "x-order-token": token }, signal: controller.signal });
+        if (response.ok) {
+          const value = await response.json();
+          if (!cancelled) setActiveOrder(normalizePublicOrder(value.id, value.order));
+        } else if (response.status === 403 || response.status === 404) return;
+      } catch { /* Keep the last confirmed order during temporary network failures. */ }
+      if (!cancelled) timeout = setTimeout(refresh, 5000);
     }
-
+    activeOrderUnsubscribeRef.current = () => { cancelled = true; clearTimeout(timeout); controller.abort(); };
+    void refresh();
     return stopActiveOrderListener;
   }, [activeOrderId, orderTrackingEnabled, stopActiveOrderListener]);
 

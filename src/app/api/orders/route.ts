@@ -1,40 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-
-type CartPayloadItem = {
-  itemId: string;
-  quantity: number;
-};
-
-function cleanText(value: unknown, maxLength: number) {
-  if (typeof value !== "string") return "";
-  return value.trim().slice(0, maxLength);
-}
+import { orderInputSchema } from "@/lib/validation";
 
 export async function POST(request: NextRequest) {
-  const body = await request.json();
-  const restaurantSlug = cleanText(body.restaurantSlug, 100);
-  const tableNumber = cleanText(body.tableNumber, 20);
-  const customerName = cleanText(body.customerName, 120);
-  const customerPhone = cleanText(body.customerPhone, 40);
-  const notes = cleanText(body.notes, 500);
-  const items = Array.isArray(body.items) ? (body.items as CartPayloadItem[]) : [];
-
-  if (!restaurantSlug || !tableNumber || !customerName || !customerPhone) {
-    return NextResponse.json({ error: "Informations client incompletes" }, { status: 400 });
-  }
-
-  const normalizedItems = items
-    .map((item) => ({
-      itemId: typeof item.itemId === "string" ? item.itemId : "",
-      quantity: Number.isInteger(item.quantity) ? item.quantity : 0,
-    }))
-    .filter((item) => item.itemId && item.quantity > 0 && item.quantity <= 50);
-
-  if (normalizedItems.length === 0) {
-    return NextResponse.json({ error: "Panier vide" }, { status: 400 });
-  }
-
+  const parsed = orderInputSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Commande invalide" }, { status: 400 });
+  const { slug: restaurantSlug, tableNumber, customerName, customerPhone, notes, items: normalizedItems } = parsed.data;
   const restaurant = await db.restaurant.findUnique({
     where: { slug: restaurantSlug },
     select: { id: true, slug: true, isSuspended: true },

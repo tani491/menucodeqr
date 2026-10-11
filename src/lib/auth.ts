@@ -131,7 +131,6 @@ function normalizeRole(role: unknown) {
 
   const normalizedRole = role.trim();
   if (!normalizedRole) return "user";
-  if (normalizedRole === "admin") return "super_admin";
 
   return normalizedRole;
 }
@@ -384,5 +383,5 @@ export const authOptions: NextAuthOptions = {
     strategy: "jwt",
     maxAge: 24 * 60 * 60,
   },
-  secret: process.env.NEXTAUTH_SECRET || "dev-secret-change-in-production-menu-qr-v1",
+  secret: process.env.NEXTAUTH_SECRET,
 };

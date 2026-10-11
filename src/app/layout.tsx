@@ -1,3 +1,4 @@
+import { siteMetadata } from "@/lib/seo";
 import type { Metadata, Viewport } from "next";
 import AuthProvider from "@/components/auth-provider";
 import { Toaster } from "@/components/ui/toaster";
@@ -11,18 +12,7 @@ export const viewport: Viewport = {
   themeColor: "#ffffff",
 };
 
-export const metadata: Metadata = {
-  title: "MenuLive",
-  description: "Votre menu digital",
-  icons: {
-    icon: "/favicon.svg",
-  },
-  openGraph: {
-    title: "MenuLive",
-    description: "Votre menu digital",
-    type: "website",
-  },
-};
+export const metadata: Metadata = { ...siteMetadata, icons: { icon: "/favicon.svg" } };
 
 export default function RootLayout({
   children,

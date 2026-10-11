@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
 import { upsertFirebaseRestaurateur } from "@/lib/firebaseUsers";
 import bcrypt from "bcryptjs";
+import { createAccountSchema } from "@/lib/validation";
 
 /**
  * POST /api/admin/create-user
@@ -18,7 +19,9 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Acces refuse" }, { status: 403 });
   }
 
-  const body = await request.json();
+  const parsed = createAccountSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Compte invalide." }, { status: 400 });
+  const body = parsed.data;
   const { name, email, password, restaurantId } = body;
 
   if (!name || typeof name !== "string" || name.trim().length < 2 || name.length > 200) {

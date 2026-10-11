@@ -41,7 +41,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { toast } from "sonner";
-import { addDoc, collection, deleteDoc, doc, getDocs, query, updateDoc, where } from "firebase/firestore";
+import { collection, getDocs, query, where } from "firebase/firestore";
+import { dishSchema } from "@/lib/validation";
+import { marketingRequest } from "@/lib/marketing";
 import {
   Plus,
   Pencil,
@@ -138,7 +140,7 @@ const FIRESTORE_DASHBOARD_TIMEOUT_MS = 12000;
 const CLOUDINARY_VIDEO_UPLOAD_URL =
   "https://api.cloudinary.com/v1_1/qpmc4yfm/video/upload";
 const CLOUDINARY_UNSIGNED_UPLOAD_PRESET = "menu_restau";
-const MAX_FIRESTORE_IMAGE_BYTES = 750_000;
+const MAX_FIRESTORE_IMAGE_BYTES = 200_000;
 const MAX_RESTAURANT_SINGLE_MEDIA_BYTES = 380_000;
 const MAX_RESTAURANT_MEDIA_BYTES = 850_000;
 const IMAGE_COMPRESSION_ATTEMPTS = [
@@ -364,10 +366,9 @@ const compressImageSourceToBase64 = (
         let width = img.width;
         let height = img.height;
 
-        if (width > attempt.maxWidth) {
-          height = Math.round((height * attempt.maxWidth) / width);
-          width = attempt.maxWidth;
-        }
+        const scale = Math.min(1, attempt.maxWidth / Math.max(width, height));
+        width = Math.max(1, Math.round(width * scale));
+        height = Math.max(1, Math.round(height * scale));
 
         canvas.width = width;
         canvas.height = height;
@@ -797,7 +798,7 @@ function RestaurantMediaSection({
       }
 
       await withTimeout(
-        updateDoc(doc(firestoreDb, "restaurants", activeRestaurantDocId), mediaUpdate),
+        marketingRequest("/api/dashboard/firestore-restaurant", { method: "PATCH", body: JSON.stringify({ primaryColor, ...(mediaUpdate.logoUrl !== undefined ? { logoUrl: mediaUpdate.logoUrl } : {}), ...(mediaUpdate.bannerUrl !== undefined ? { bannerUrl: mediaUpdate.bannerUrl } : {}) }) }),
         FIRESTORE_DASHBOARD_TIMEOUT_MS,
         "Delai depasse lors de l'enregistrement des medias."
       );
@@ -1161,7 +1162,7 @@ export default function DashboardPage() {
       session?.user?.restaurantId,
     ]
   );
-  const dashboardSession = currentDashboardSession || tabSession;
+  const dashboardSession = currentDashboardSession;
 
   // ─── Protection côté client ────────────────────────────────────────────
   useEffect(() => {
@@ -1264,11 +1265,7 @@ export default function DashboardPage() {
       );
 
       try {
-        await updateDoc(doc(firestoreDb, targetItem.sourceCollection || "dishes", itemId), {
-          isAvailable: !targetItem.isAvailable,
-          status: targetItem.isAvailable ? "unavailable" : "available",
-          updatedAt: new Date().toISOString(),
-        });
+        await marketingRequest("/api/dashboard/firestore-items", { method: "POST", body: JSON.stringify({ action: "update", id: itemId, collection: targetItem.sourceCollection || "dishes", data: { isAvailable: !targetItem.isAvailable } }) });
       } catch {
         fetchMenu();
       }
@@ -1284,7 +1281,7 @@ export default function DashboardPage() {
       );
 
       try {
-        await deleteDoc(doc(firestoreDb, targetItem.sourceCollection || "dishes", itemId));
+        await marketingRequest("/api/dashboard/firestore-items", { method: "POST", body: JSON.stringify({ action: "delete", id: itemId, collection: targetItem.sourceCollection || "dishes" }) });
         toast.success(`\"${targetItem.nameFr}\" supprimé`);
       } catch {
         fetchMenu();
@@ -1299,9 +1296,7 @@ export default function DashboardPage() {
       try {
         const activeRestaurantId = firstStringValue(
           data?.restaurantId,
-          data?.restaurantDocId,
-          localStorageValue("activeRestaurantId"),
-          localStorageValue("activeRestaurantDocId")
+          data?.restaurantDocId
         );
 
         if (!activeRestaurantId) {
@@ -1335,27 +1330,20 @@ export default function DashboardPage() {
           : formData.videoUrl.trim() || null;
 
         const payload = {
-          name: formData.nameFr.trim(),
           nameFr: formData.nameFr.trim(),
           nameEn: formData.nameEn.trim() || null,
-          description: formData.descriptionFr.trim() || null,
           descriptionFr: formData.descriptionFr.trim() || null,
           descriptionEn: formData.descriptionEn.trim() || null,
           price,
-          category: formData.categoryId,
           categoryId: formData.categoryId,
           videoUrl,
           isAvailable: formData.isAvailable,
-          status: formData.isAvailable ? "available" : "unavailable",
         };
 
+        dishSchema.parse({ ...payload, ...imagePatch });
         if (itemId) {
           await withTimeout(
-            updateDoc(doc(firestoreDb, formData.sourceCollection || "dishes", itemId), {
-              ...payload,
-              ...imagePatch,
-              updatedAt: now,
-            }),
+            marketingRequest("/api/dashboard/firestore-items", { method: "POST", body: JSON.stringify({ action: "update", id: itemId, collection: formData.sourceCollection || "dishes", data: { ...payload, ...imagePatch } }) }),
             FIRESTORE_DASHBOARD_TIMEOUT_MS,
             "Delai depasse lors de la mise a jour du plat."
           );
@@ -1366,13 +1354,8 @@ export default function DashboardPage() {
             imageUrl: imagePatch.imageUrl || "",
           };
 
-          const createdDishRef = await withTimeout(
-            addDoc(collection(firestoreDb, "dishes"), {
-              ...createPayload,
-              restaurantId: activeRestaurantId,
-              createdAt: now,
-              updatedAt: now,
-            }),
+          const createdDishRef = await withTimeout<{ id: string }>(
+            marketingRequest<{ id: string }>("/api/dashboard/firestore-items", { method: "POST", body: JSON.stringify({ action: "create", data: createPayload }) }),
             FIRESTORE_DASHBOARD_TIMEOUT_MS,
             "Delai depasse lors de la creation du plat."
           );

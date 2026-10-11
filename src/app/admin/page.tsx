@@ -1,4 +1,5 @@
 "use client";
+import { restaurantCreationSchema } from "@/lib/validation";
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSession, signOut } from "next-auth/react";
@@ -179,6 +180,7 @@ function CreateRestaurantDialog({
     setSaving(true);
 
     try {
+      restaurantCreationSchema.parse(form);
       const nameValue = form.name.trim();
       const slugValue = form.slug.trim().toLowerCase();
       const emailValue = form.managerEmail.trim().toLowerCase();
@@ -581,7 +583,7 @@ export default function AdminPage() {
       session?.user?.restaurantId,
     ]
   );
-  const adminSession = currentAdminSession || tabSession;
+  const adminSession = currentAdminSession;
   const isAdminSession = !!adminSession;
 
   // Protection côté client (double sécurité avec le middleware serveur)

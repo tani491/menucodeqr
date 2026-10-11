@@ -6,11 +6,11 @@ import { marketingDatabase, readMarketing } from "@/lib/marketing-server";
 import { settingsSchema, testimonialSchema } from "@/lib/marketing";
 
 const mutation = z.discriminatedUnion("action", [
-  z.object({ action: z.literal("settings"), data: settingsSchema }),
-  z.object({ action: z.literal("create"), data: testimonialSchema }),
-  z.object({ action: z.literal("update"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), data: testimonialSchema }),
-  z.object({ action: z.literal("toggle"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), isActive: z.boolean() }),
-  z.object({ action: z.literal("delete"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/) }),
+  z.object({ action: z.literal("settings"), data: settingsSchema }).strict(),
+  z.object({ action: z.literal("create"), data: testimonialSchema }).strict(),
+  z.object({ action: z.literal("update"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), data: testimonialSchema }).strict(),
+  z.object({ action: z.literal("toggle"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/), isActive: z.boolean() }).strict(),
+  z.object({ action: z.literal("delete"), id: z.string().regex(/^[A-Za-z0-9_-]{1,128}$/) }).strict(),
 ]);
 async function authorize() {
   const auth = await requireAuth();
@@ -26,7 +26,6 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   const denied = await authorize();
   if (denied) return denied;
-  if (request.headers.get("origin") !== request.nextUrl.origin) return NextResponse.json({ error: "Origine refusée." }, { status: 403 });
   let body;
   try {
     const raw = await request.text();

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from "next/server";
 import QRCode from "qrcode";
 import { requireActiveRestaurateur } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { z } from "zod";
+import { tableNumberSchema } from "@/lib/validation";
 
 /**
  * GET /api/dashboard/qrcode?format=png|svg&table=1
@@ -20,12 +22,11 @@ export async function GET(request: NextRequest) {
   if (auth.error) return auth.error;
 
   const { searchParams } = request.nextUrl;
-  const format = searchParams.get("format") || "png";
-  const tableNumber = (searchParams.get("table") || "1").trim();
-
-  if (!/^[a-zA-Z0-9_-]{1,20}$/.test(tableNumber)) {
+  const parsed = z.object({ format: z.enum(["png", "svg"]), table: tableNumberSchema }).strict().safeParse({ format: searchParams.get("format") || "png", table: searchParams.get("table") || "1" });
+  if (!parsed.success) {
     return NextResponse.json({ error: "Numero de table invalide" }, { status: 400 });
   }
+  const { format, table: tableNumber } = parsed.data;
 
   const restaurant = await db.restaurant.findUnique({
     where: { id: auth.restaurantId },
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
       return new NextResponse(svgString, {
         headers: {
           "Content-Type": "image/svg+xml",
-          "Content-Disposition": `attachment; filename="qr-${restaurant.slug}-table-${tableNumber}.svg"`,
+          "Content-Disposition": `attachment; filename="qr-${encodeURIComponent(restaurant.slug)}-table-${encodeURIComponent(tableNumber)}.svg"`,
           "Cache-Control": "no-store",
         },
       });
@@ -69,7 +70,7 @@ export async function GET(request: NextRequest) {
     return new NextResponse(new Uint8Array(pngBuffer), {
       headers: {
         "Content-Type": "image/png",
-        "Content-Disposition": `attachment; filename="qr-${restaurant.slug}-table-${tableNumber}.png"`,
+        "Content-Disposition": `attachment; filename="qr-${encodeURIComponent(restaurant.slug)}-table-${encodeURIComponent(tableNumber)}.png"`,
         "Cache-Control": "no-store",
       },
     });

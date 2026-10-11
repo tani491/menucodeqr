@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveRestaurateur } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { dishSchema } from "@/lib/validation";
 import { invalidateMenuCache } from "@/lib/menu-data";
 
 /**
@@ -11,7 +12,9 @@ export async function POST(request: NextRequest) {
   const auth = await requireActiveRestaurateur();
   if (auth.error) return auth.error;
 
-  const body = await request.json();
+  const parsed = dishSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Champs du plat invalides" }, { status: 400 });
+  const body = parsed.data;
   const { nameFr, nameEn, descriptionFr, descriptionEn, price, categoryId, imageUrl, videoUrl, isAvailable } = body;
 
   if (!nameFr || typeof nameFr !== "string" || nameFr.trim().length < 1 || nameFr.length > 200) {

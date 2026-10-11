@@ -2,6 +2,7 @@ export const dynamic = "force-dynamic";
 export const revalidate = 0;
 
 import Link from "next/link";
+import { siteMetadata, structuredData } from "@/lib/seo";
 import type { Metadata } from "next";
 import { ArrowUpRight, FileText, RefreshCw, Smartphone } from "lucide-react";
 import Image from "next/image";
@@ -9,15 +10,7 @@ import { headers } from "next/headers";
 import QRCode from "qrcode";
 import { WhatsAppIcon, whatsappContactUrl } from "@/components/WhatsAppContact";
 
-export const metadata: Metadata = {
-  title: "MenuLive — Carte papier sur-mesure & menu digital",
-  description: "Une création physique haut de gamme alliée à la rapidité de la commande sur smartphone. Découvrez MenuLive pour votre restaurant.",
-  openGraph: {
-    title: "MenuLive — Carte papier sur-mesure & menu digital",
-    description: "Une belle carte papier. Un menu digital toujours à jour.",
-    type: "website",
-  },
-};
+export const metadata: Metadata = { ...siteMetadata, alternates: { canonical: "/" } };
 
 const pillars = [
   { icon: FileText, title: "Impression Papier Premium", description: "Cartes A4/A3 pelliculées et personnalisées, pensées pour votre restaurant." },
@@ -103,6 +96,7 @@ async function MenuPreview() {
 export default function HomePage() {
   return (
     <main className="min-h-screen bg-white text-[#111827]">
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(structuredData).replace(/</g, "\u003c") }} />
       <header className="mx-auto flex max-w-6xl items-center justify-between px-6 py-7 lg:px-8">
         <Link href="/" aria-label="MenuLive, accueil" className="font-serif text-3xl tracking-tight">MenuLive<span className="text-[#0F5132]">.</span></Link>
         <Link href="/login" className="inline-flex items-center gap-2 text-sm text-[#4B5563] transition-colors hover:text-[#111827]">Mon espace<ArrowUpRight className="h-4 w-4" aria-hidden="true" /></Link>

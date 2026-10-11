@@ -3,8 +3,6 @@ import { getAuth } from "firebase/auth";
 import {
   getFirestore,
   initializeFirestore,
-  persistentLocalCache,
-  persistentMultipleTabManager,
   type Firestore,
 } from "firebase/firestore";
 import { firebaseConfig, getFirebasePublicConfig } from "./firebaseConfig";
@@ -19,14 +17,7 @@ function getDashboardFirestore() {
   try {
     cachedFirestore = initializeFirestore(app, {
       experimentalAutoDetectLongPolling: true,
-      ...(typeof window !== "undefined"
-        ? {
-            // IndexedDB persistence, equivalent to enableIndexedDbPersistence with multi-tab support.
-            localCache: persistentLocalCache({
-              tabManager: persistentMultipleTabManager(),
-            }),
-          }
-        : {}),
+      // Keep private orders in memory rather than shared persistent browser storage.
     });
   } catch {
     cachedFirestore = getFirestore(app);

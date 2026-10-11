@@ -17,7 +17,8 @@ export async function readMarketing(publicOnly = false) {
   ]);
   const testimonials: Testimonial[] = reviews.docs.flatMap((doc) => {
     const data = doc.data();
-    const parsed = testimonialSchema.safeParse(data);
+    const { id: _id, createdAt: _createdAt, ...fields } = data;
+    const parsed = testimonialSchema.safeParse(fields);
     if (!parsed.success) return [];
     const date = data.createdAt;
     return [{ ...parsed.data, id: doc.id, createdAt: typeof date === "string" ? date : date?.toDate?.().toISOString() || "" }];

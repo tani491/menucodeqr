@@ -1,14 +1,4 @@
-import { getApp, getApps, initializeApp } from "firebase/app";
-import {
-  collection,
-  getDocs,
-  getFirestore,
-  limit,
-  query,
-  where,
-  type Firestore,
-} from "firebase/firestore";
-import { getFirebasePublicConfig } from "./firebaseConfig";
+import { getFirebaseAdminFirestore } from "./firebaseAdmin";
 import { cache } from "react";
 
 // ─── Types publics ──────────────────────────────────────────────────────────
@@ -57,18 +47,10 @@ export interface MenuData {
 const menuCache = new Map<string, { data: MenuData; timestamp: number }>();
 const CACHE_TTL_MS = 0; // Le statut de suspension doit etre relu a chaque requete publique.
 
-let cachedFirestoreDb: Firestore | null | undefined;
-
 type FirestoreRecord = Record<string, unknown>;
 
 function getMenuFirestoreDb() {
-  if (cachedFirestoreDb !== undefined) {
-    return cachedFirestoreDb;
-  }
-
-  const app = getApps().length ? getApp() : initializeApp(getFirebasePublicConfig());
-  cachedFirestoreDb = getFirestore(app);
-  return cachedFirestoreDb;
+  return getFirebaseAdminFirestore();
 }
 
 function stringValue(value: unknown, fallback = "") {
@@ -147,13 +129,10 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
     return cached.data;
   }
 
+  try {
   const db = getMenuFirestoreDb();
   if (!db) return null;
-
-  try {
-  const restaurantsSnapshot = await getDocs(
-    query(collection(db, "restaurants"), where("slug", "==", slug), limit(1))
-  );
+  const restaurantsSnapshot = await db.collection("restaurants").where("slug", "==", slug).limit(1).get();
 
   const restaurantDoc = restaurantsSnapshot.docs[0];
   if (!restaurantDoc) return null;
@@ -179,15 +158,9 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   }
 
   const [categoriesSnapshot, dishesSnapshot, itemsSnapshot] = await Promise.all([
-    getDocs(
-      query(collection(db, "categories"), where("restaurantId", "==", restaurantId))
-    ),
-    getDocs(
-      query(collection(db, "dishes"), where("restaurantId", "==", restaurantId))
-    ),
-    getDocs(
-      query(collection(db, "items"), where("restaurantId", "==", restaurantId))
-    ),
+    db.collection("categories").where("restaurantId", "==", restaurantId).get(),
+    db.collection("dishes").where("restaurantId", "==", restaurantId).get(),
+    db.collection("items").where("restaurantId", "==", restaurantId).get(),
   ]);
 
   const dishIds = new Set(dishesSnapshot.docs.map((dishDoc) => dishDoc.id));
@@ -250,7 +223,8 @@ async function _getMenuBySlug(slug: string): Promise<MenuData | null> {
   return data;
   } catch (error) {
     console.error("Erreur Firestore getMenuBySlug:", error);
-    return cached?.data ?? null;
+    // Never serve a previously active restaurant when suspension cannot be checked.
+    return null;
   }
 }
 
@@ -268,11 +242,10 @@ export function invalidateMenuCache(slug: string) {
  * Liste tous les slugs disponibles (pour generateStaticParams).
  */
 export const getAllRestaurantSlugs = cache(async (): Promise<string[]> => {
-  const db = getMenuFirestoreDb();
-  if (!db) return [];
-
   try {
-    const restaurantsSnapshot = await getDocs(collection(db, "restaurants"));
+    const db = getMenuFirestoreDb();
+    if (!db) return [];
+    const restaurantsSnapshot = await db.collection("restaurants").get();
 
     return restaurantsSnapshot.docs
       .map((restaurantDoc) => stringValue((restaurantDoc.data() as FirestoreRecord).slug))

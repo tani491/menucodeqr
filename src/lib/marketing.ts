@@ -12,7 +12,7 @@ export const testimonialSchema = z.object({
   rating: z.number().int().min(1).max(5),
   avatarBase64: imageSchema,
   isActive: z.boolean(),
-});
+}).strict();
 export const settingsSchema = z.object({
   whatsappNumber: z.string().trim().regex(/^(?:[1-9]\d{7,14})?$/, "Numéro international sans + ni espaces."),
   defaultMessage: z.string().trim().max(1000),
@@ -20,8 +20,8 @@ export const settingsSchema = z.object({
   stats: z.object({
     totalRestaurants: z.number().int().min(0).max(1_000_000),
     satisfactionRate: z.number().min(0).max(100),
-  }),
-});
+  }).strict(),
+}).strict();
 export type Testimonial = z.infer<typeof testimonialSchema> & { id: string; createdAt: string };
 export type MarketingSettings = z.infer<typeof settingsSchema>;
 export type MarketingData = { testimonials: Testimonial[]; settings: MarketingSettings };

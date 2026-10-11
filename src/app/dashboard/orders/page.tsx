@@ -12,6 +12,7 @@ import {
   workspaceSessionFromUser,
   type TabWorkspaceSession,
 } from "@/lib/tab-session";
+import { sanitizeTableNumber } from "@/lib/validation";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
@@ -129,7 +130,7 @@ function normalizeOrder(docSnap: QueryDocumentSnapshot): DashboardOrder {
 
   return {
     id: docSnap.id,
-    tableNumber: stringValue(data.tableNumber, "1"),
+    tableNumber: sanitizeTableNumber(data.tableNumber) || "1",
     customerName: stringValue(data.customerName, "Client"),
     customerPhone: stringValue(data.customerPhone),
     status: normalizeOrderStatus(data.status),
@@ -181,7 +182,7 @@ export default function DashboardOrdersPage() {
       session?.user?.restaurantId,
     ]
   );
-  const dashboardSession = currentDashboardSession || tabSession;
+  const dashboardSession = currentDashboardSession;
   const stopOrdersListener = useCallback(() => {
     ordersUnsubscribeRef.current?.();
     ordersUnsubscribeRef.current = null;
@@ -387,6 +388,8 @@ export default function DashboardOrdersPage() {
           throw new Error("ORDER_NOT_FOUND");
         }
 
+        if (snapshot.data().restaurantId !== currentRestaurant?.id) throw new Error("ORDER_NOT_FOUND");
+        if (snapshot.data().restaurantId !== currentRestaurant?.id) throw new Error("ORDER_NOT_FOUND");
         const currentStatus = normalizeOrderStatus(snapshot.data().status);
         if (currentStatus !== order.status) {
           throw new Error("ORDER_STATUS_CHANGED");

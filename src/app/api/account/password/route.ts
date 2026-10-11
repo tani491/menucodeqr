@@ -99,7 +99,10 @@ export async function PATCH(request: NextRequest) {
   const auth = await requireAuth();
   if (auth.error) return auth.error;
 
-  const body = await request.json();
+  const { passwordChangeSchema } = await import("@/lib/validation");
+  const parsed = passwordChangeSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Mots de passe invalides." }, { status: 400 });
+  const body = parsed.data;
   const currentPassword = typeof body.currentPassword === "string" ? body.currentPassword : "";
   const newPassword = typeof body.newPassword === "string" ? body.newPassword : "";
 

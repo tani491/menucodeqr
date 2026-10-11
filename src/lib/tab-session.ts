@@ -26,7 +26,7 @@ function stringValue(value: unknown) {
 }
 
 function roleMatchesScope(scope: WorkspaceScope, role: string) {
-  if (scope === "admin") return role === "admin" || role === "super_admin";
+  if (scope === "admin") return role === "super_admin";
   return role === "restaurateur";
 }
 

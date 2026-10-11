@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveRestaurateur } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { dishSchema } from "@/lib/validation";
 import { invalidateMenuCache } from "@/lib/menu-data";
 
 /**
@@ -14,7 +15,9 @@ export async function PUT(
   if (auth.error) return auth.error;
 
   const { id } = await params;
-  const body = await request.json();
+  const parsed = dishSchema.partial().safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Champs du plat invalides" }, { status: 400 });
+  const body = parsed.data;
 
   const existing = await db.item.findFirst({
     where: { id, restaurantId: auth.restaurantId },
@@ -33,10 +36,10 @@ export async function PUT(
   }
 
   const updated = await db.item.update({
-    where: { id },
+    where: { id, restaurantId: auth.restaurantId },
     data: {
       ...(body.nameFr !== undefined && { nameFr: body.nameFr.trim() }),
-      ...(body.nameEn !== undefined && { nameEn: body.nameEn.trim() }),
+      ...(body.nameEn !== undefined && { nameEn: body.nameEn?.trim() || existing.nameFr }),
       ...(body.descriptionFr !== undefined && { descriptionFr: body.descriptionFr?.trim() || null }),
       ...(body.descriptionEn !== undefined && { descriptionEn: body.descriptionEn?.trim() || null }),
       ...(body.price !== undefined && { price: Math.round(body.price * 100) / 100 }),
@@ -72,7 +75,7 @@ export async function DELETE(
     return NextResponse.json({ error: "Plat introuvable ou non autorisé" }, { status: 404 });
   }
 
-  await db.item.delete({ where: { id } });
+  await db.item.delete({ where: { id, restaurantId: auth.restaurantId } });
 
   const restaurant = await db.restaurant.findUnique({ where: { id: auth.restaurantId }, select: { slug: true } });
   if (restaurant) invalidateMenuCache(restaurant.slug);

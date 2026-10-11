@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import { requireRestaurateur } from "@/lib/api-auth";
 
 export const dynamic = "force-dynamic";
 
@@ -8,9 +9,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> }
 ) {
   const { id } = await params;
+  const auth = await requireRestaurateur();
+  if (auth.error) return auth.error;
 
-  const order = await db.order.findUnique({
-    where: { id },
+  const order = await db.order.findFirst({
+    where: { id, restaurantId: auth.restaurantId },
     include: {
       restaurant: {
         select: {

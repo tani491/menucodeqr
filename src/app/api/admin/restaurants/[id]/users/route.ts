@@ -4,6 +4,7 @@ import { db } from "@/lib/db";
 import { getFirebaseAdminFirestore } from "@/lib/firebaseAdmin";
 import { upsertFirebaseRestaurateur } from "@/lib/firebaseUsers";
 import bcrypt from "bcryptjs";
+import { accountSchema } from "@/lib/validation";
 
 /**
  * POST /api/admin/restaurants/[id]/users
@@ -21,7 +22,9 @@ export async function POST(
   }
 
   const { id: restaurantId } = await params;
-  const body = await request.json();
+  const parsed = accountSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Compte invalide." }, { status: 400 });
+  const body = parsed.data;
   const { name, email, password } = body;
 
   if (!name || typeof name !== "string" || name.trim().length < 1) {

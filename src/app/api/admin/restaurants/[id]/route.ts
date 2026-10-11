@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireAuth } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { suspensionSchema } from "@/lib/validation";
 import { invalidateMenuCache } from "@/lib/menu-data";
 
 /**
@@ -49,7 +50,9 @@ export async function PATCH(
   }
 
   const { id } = await params;
-  const body = await request.json();
+  const parsed = suspensionSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Statut invalide." }, { status: 400 });
+  const body = parsed.data;
 
   if (typeof body.isSuspended !== "boolean") {
     return NextResponse.json({ error: "Statut de suspension invalide" }, { status: 400 });

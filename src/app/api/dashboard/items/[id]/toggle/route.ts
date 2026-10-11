@@ -26,7 +26,7 @@ export async function PATCH(
   }
 
   const updated = await db.item.update({
-    where: { id },
+    where: { id, restaurantId: auth.restaurantId },
     data: { isAvailable: !item.isAvailable },
   });
 

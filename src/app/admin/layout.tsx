@@ -25,7 +25,7 @@ export default function AdminLayout({ children }: { children: ReactNode }) {
       session?.user?.restaurantId,
     ]
   );
-  const adminSession = currentAdminSession || tabSession;
+  const adminSession = currentAdminSession;
 
   useEffect(() => {
     if (currentAdminSession) {

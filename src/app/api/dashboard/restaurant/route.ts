@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { requireActiveRestaurateur } from "@/lib/api-auth";
 import { db } from "@/lib/db";
+import { restaurantAppearanceSchema } from "@/lib/validation";
 import { invalidateMenuCache } from "@/lib/menu-data";
 
 function cleanMediaUrl(value: unknown) {
@@ -22,7 +23,9 @@ export async function PATCH(request: NextRequest) {
   const auth = await requireActiveRestaurateur();
   if (auth.error) return auth.error;
 
-  const body = await request.json();
+  const parsed = restaurantAppearanceSchema.safeParse(await request.json().catch(() => null));
+  if (!parsed.success) return NextResponse.json({ error: "Paramètres invalides." }, { status: 400 });
+  const body = parsed.data;
   const logoUrl = cleanMediaUrl(body.logoUrl);
   const bannerUrl = cleanMediaUrl(body.bannerUrl);
   const primaryColor = cleanPrimaryColor(body.primaryColor);

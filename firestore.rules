@@ -1,0 +1,63 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function profile() {
+      return get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+    }
+    function admin() {
+      return request.auth != null && profile().role == 'super_admin'
+        && profile().get('status', 'active') != 'suspended';
+    }
+    function tenant(restaurantId) {
+      return request.auth != null && profile().role == 'restaurateur'
+        && profile().get('status', 'active') != 'suspended'
+        && profile().restaurantId == restaurantId;
+    }
+    match /users/{id} {
+      allow read: if admin() || (request.auth != null && request.auth.uid == id);
+      allow write: if admin();
+    }
+    match /accounts/{id} {
+      allow read: if admin() || (request.auth != null && request.auth.uid == id);
+      allow write: if admin();
+    }
+    // Owner email and UID are private; the server publishes only menu fields.
+    match /restaurants/{id} {
+      allow read: if admin() || (request.auth != null && resource.data.userId == request.auth.uid);
+      allow write: if admin();
+    }
+    match /categories/{id} {
+      allow read: if true;
+      allow write: if admin();
+    }
+    match /dishes/{id} {
+      allow read: if true;
+      // Validated tenant mutations go through the server API.
+      allow write: if admin();
+    }
+    match /items/{id} {
+      allow read: if true;
+      allow write: if admin();
+    }
+    match /orders/{id} {
+      allow read: if admin() || tenant(resource.data.restaurantId);
+      // Anonymous ordering and private tracking are validated by the server.
+      allow create: if false;
+      allow update: if admin() || (tenant(resource.data.restaurantId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'statusUpdatedAt', 'updatedAt'])
+        && ((resource.data.status == 'pending' && request.resource.data.status == 'ready')
+          || (resource.data.status == 'ready' && request.resource.data.status == 'delivered')));
+      allow delete: if admin() || (tenant(resource.data.restaurantId) && resource.data.status == 'delivered');
+    }
+    match /order_access/{id} { allow read, write: if false; }
+    match /testimonials/{id} {
+      allow read: if resource.data.isActive == true || admin();
+      allow write: if false;
+    }
+    match /site_settings/{id} {
+      allow read: if true;
+      allow write: if false;
+    }
+    match /{document=**} { allow read, write: if false; }
+  }
+}
