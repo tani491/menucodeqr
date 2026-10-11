@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import AuthProvider from "@/components/auth-provider";
 import { Toaster } from "@/components/ui/toaster";
+import WhatsAppContact from "@/components/WhatsAppContact";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -11,13 +12,13 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  title: "MenuCodeQR",
+  title: "MenuLive",
   description: "Votre menu digital",
   icons: {
     icon: "/favicon.svg",
   },
   openGraph: {
-    title: "MenuCodeQR",
+    title: "MenuLive",
     description: "Votre menu digital",
     type: "website",
   },
@@ -35,6 +36,7 @@ export default function RootLayout({
           {children}
         </AuthProvider>
         <Toaster />
+        <WhatsAppContact />
       </body>
     </html>
   );
